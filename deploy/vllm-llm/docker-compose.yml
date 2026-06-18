@@ -1,0 +1,39 @@
+services:
+  vllm-llm:
+    image: vllm/vllm-openai:latest
+    container_name: vllm-llm
+    restart: unless-stopped
+    ports:
+      - "${LLM_PORT:-5001}:8000"
+    env_file:
+      - .env
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      VLLM_VERSION: ${VLLM_VERSION:-v0}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    shm_size: "2gb"
+    command:
+      - --model
+      - ${LLM_MODEL:-Qwen/Qwen3.5-0.8B}
+      - --served-model-name
+      - ${LLM_MODEL_ALIAS:-qwen-3.5}
+      - --gpu-memory-utilization
+      - ${LLM_GPU_MEMORY_UTILIZATION:-0.75}
+      - --max-model-len
+      - ${LLM_MAX_MODEL_LEN:-2048}
+      - --enforce-eager
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:
