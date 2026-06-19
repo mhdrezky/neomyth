@@ -1,0 +1,87 @@
+# Root orchestration — use profiles to start subsets
+#
+# Workers only:  docker compose --profile workers up -d
+# Full stack:    docker compose --profile full up -d
+
+services:
+  vllm-llm:
+    profiles: [workers, full]
+    image: vllm/vllm-openai:latest
+    container_name: vllm-llm
+    restart: unless-stopped
+    ports:
+      - "${VLLM_PORT:-5001}:8000"
+    env_file:
+      - ./vllm-llm/.env
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - hf-cache:/root/.cache/huggingface
+    shm_size: "2gb"
+    command:
+      - --model
+      - ${VLLM_MODEL:-Qwen/Qwen3.5-0.8B}
+      - --served-model-name
+      - ${VLLM_MODEL_ALIAS:-qwen-3.5}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  whisper-stt:
+    profiles: [workers, full]
+    build: ./whisper-stt
+    container_name: whisper-stt
+    restart: unless-stopped
+    ports:
+      - "${WHISPER_PORT:-5002}:8000"
+    env_file:
+      - ./whisper-stt/.env
+    volumes:
+      - whisper-cache:/root/.cache
+
+  kokoro-tts:
+    profiles: [workers, full]
+    build: ./kokoro-tts
+    container_name: kokoro-tts
+    restart: unless-stopped
+    ports:
+      - "${KOKORO_PORT:-5003}:8000"
+    env_file:
+      - ./kokoro-tts/.env
+    volumes:
+      - kokoro-cache:/root/.cache
+
+  neomyth-api:
+    profiles: [full]
+    build:
+      context: ..
+      dockerfile: deploy/api/Dockerfile
+    container_name: neomyth-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8080}:8080"
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8080
+      VLLM_BASE_URL: http://vllm-llm:8000/v1
+      VLLM_MODEL: ${VLLM_MODEL_ALIAS:-qwen-3.5}
+      STT_BASE_URL: http://whisper-stt:8000
+      TTS_BASE_URL: http://kokoro-tts:8000
+      TTS_VOICE: ${KOKORO_VOICE:-af_sarah}
+    depends_on:
+      - vllm-llm
+      - whisper-stt
+      - kokoro-tts
+
+volumes:
+  hf-cache:
+  whisper-cache:
+  kokoro-cache:

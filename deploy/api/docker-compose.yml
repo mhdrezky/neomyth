@@ -1,0 +1,24 @@
+services:
+  neomyth-api:
+    build:
+      context: ../..
+      dockerfile: deploy/api/Dockerfile
+    container_name: neomyth-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8080}:8080"
+    env_file:
+      - .env
+    depends_on:
+      - whisper-stt
+      - kokoro-tts
+
+  whisper-stt:
+    extends:
+      file: ../whisper-stt/docker-compose.yml
+      service: whisper-stt
+
+  kokoro-tts:
+    extends:
+      file: ../kokoro-tts/docker-compose.yml
+      service: kokoro-tts

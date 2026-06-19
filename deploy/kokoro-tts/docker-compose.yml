@@ -1,0 +1,14 @@
+services:
+  kokoro-tts:
+    build: .
+    container_name: kokoro-tts
+    restart: unless-stopped
+    ports:
+      - "${KOKORO_PORT:-5003}:8000"
+    env_file:
+      - .env
+    volumes:
+      - kokoro-cache:/root/.cache
+
+volumes:
+  kokoro-cache:
