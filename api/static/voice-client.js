@@ -30,6 +30,10 @@
   let nextPlayTime = 0;
   let activeSources = [];
   let playbackEpoch = 0;
+  let interruptEnabled =
+    typeof window !== "undefined" &&
+    window.NEOMYTH_VOICE &&
+    window.NEOMYTH_VOICE.interruptEnabled === true;
 
   let assistantBuffer = "";
 
@@ -158,6 +162,13 @@
   }
 
   function onAudioProcess(e) {
+    if (
+      !interruptEnabled &&
+      (phase === "speaking" || phase === "thinking")
+    ) {
+      return;
+    }
+
     const input = e.inputBuffer.getChannelData(0);
     const down = downsample(input, audioContext.sampleRate, SAMPLE_RATE);
     const energy = rms(down);
@@ -167,7 +178,7 @@
       if (!isSpeaking) {
         isSpeaking = true;
         speechStartTs = now;
-        if (phase === "speaking" || phase === "thinking") {
+        if (interruptEnabled && (phase === "speaking" || phase === "thinking")) {
           interruptAI();
         }
         send({ type: "speech_start", data: {} });
@@ -190,6 +201,13 @@
 
   function handleMessage(event) {
     const msg = JSON.parse(event.data);
+
+    if (msg.type === "config") {
+      interruptEnabled = Boolean(msg.data.interrupt_enabled);
+      const el = document.getElementById("interruptStatus");
+      if (el) el.textContent = interruptEnabled ? "on" : "off";
+      return;
+    }
 
     if (msg.type === "state") {
       setPhase(msg.data.phase || "idle");

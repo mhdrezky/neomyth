@@ -26,6 +26,27 @@ def trim_message_history(
     return system + rest
 
 
+def clean_text_for_tts(text: str) -> str:
+    """Strip markdown so TTS does not speak asterisks, hashes, or list markers."""
+    if not text.strip():
+        return ""
+
+    t = text
+    t = re.sub(r"```[\s\S]*?```", " ", t)
+    t = re.sub(r"`([^`]+)`", r"\1", t)
+    t = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", t)
+    t = re.sub(r"\*\*([^*]+)\*\*", r"\1", t)
+    t = re.sub(r"__([^_]+)__", r"\1", t)
+    t = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"\1", t)
+    t = re.sub(r"(?<!_)_([^_\n]+)_(?!_)", r"\1", t)
+    t = re.sub(r"^#{1,6}\s*", "", t, flags=re.MULTILINE)
+    t = re.sub(r"^\s*[-*+]\s+", "", t, flags=re.MULTILINE)
+    t = re.sub(r"^\s*\d+[.)]\s+", "", t, flags=re.MULTILINE)
+    t = t.replace("*", " ").replace("#", " ").replace("_", " ")
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
 def split_text_for_tts(
     text: str,
     max_chars: int = MAX_TTS_CHUNK_CHARS,

@@ -8,8 +8,9 @@ from modules.shared.utils.text import trim_message_history
 
 VOICE_SYSTEM_PROMPT = (
     "You are a helpful voice assistant. Reply in the same language the user speaks. "
-    "Keep replies short, conversational, and easy to speak aloud. "
-    "Do not use markdown, bullet lists, or code blocks."
+    "Your reply will be read aloud by text-to-speech. Use plain spoken sentences only. "
+    "Never use markdown, asterisks, bold, bullet lists, numbered lists, headers, or code. "
+    "No symbols like * # _ ` or **. Keep replies short and conversational."
 )
 
 

@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 
 from modules.shared.types import Phase, PipelineEvent, PipelineEventType
 from modules.shared.utils.http import create_async_client
-from modules.shared.utils.text import SentenceChunker
+from modules.shared.utils.text import SentenceChunker, clean_text_for_tts
 from modules.voice.clients.llm import LLMClient
 from modules.voice.clients.stt import STTClient
 from modules.voice.clients.tts import TTSClient
@@ -109,7 +109,7 @@ class VoicePipeline:
                     yield event
 
             if assistant_text.strip():
-                self._state.append_assistant(assistant_text.strip())
+                self._state.append_assistant(clean_text_for_tts(assistant_text))
 
             if gen == self._generation_id:
                 self._state.set_phase(Phase.LISTENING)
@@ -141,13 +141,16 @@ class VoicePipeline:
     ) -> AsyncIterator[PipelineEvent]:
         if generation_id != self._generation_id:
             return
+        spoken = clean_text_for_tts(sentence)
+        if not spoken:
+            return
         self._state.set_phase(Phase.SPEAKING)
         yield PipelineEvent(
             type=PipelineEventType.STATE,
             data={"phase": Phase.SPEAKING.value},
         )
         async for chunk, sample_rate in self._tts.synthesize(
-            sentence,
+            spoken,
             cancel_event=self._cancel_event,
         ):
             if generation_id != self._generation_id or self._cancel_event.is_set():

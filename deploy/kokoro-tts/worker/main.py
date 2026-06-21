@@ -1,9 +1,8 @@
-"""Kokoro TTS inference worker."""
+"""Official hexgrad/Kokoro-82M TTS worker (PyTorch)."""
 
 import logging
 import os
 import re
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
@@ -11,28 +10,14 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
+# Kokoro lang_code: a=American en, b=British, e=es, f=fr, h=hi, i=it, j=ja, p=pt-br, z=zh
+# See https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md
+KOKORO_LANG_CODE = os.getenv("KOKORO_LANG_CODE", "a")
 KOKORO_VOICE = os.getenv("KOKORO_VOICE", "af_sarah")
-KOKORO_LANG = os.getenv("KOKORO_LANG", "en-us")
 KOKORO_MAX_CHARS = int(os.getenv("KOKORO_MAX_CHARS", "150"))
-KOKORO_MODEL_PATH = os.getenv(
-    "KOKORO_MODEL_PATH",
-    "/app/models/kokoro-v1.0.onnx",
-)
-KOKORO_VOICES_PATH = os.getenv(
-    "KOKORO_VOICES_PATH",
-    "/app/models/voices-v1.0.bin",
-)
+KOKORO_MODEL_ID = "hexgrad/Kokoro-82M"
 
-MODEL_URL = (
-    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
-    "model-files-v1.0/kokoro-v1.0.onnx"
-)
-VOICES_URL = (
-    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/"
-    "model-files-v1.0/voices-v1.0.bin"
-)
-
-app = FastAPI(title="Kokoro TTS Worker")
+app = FastAPI(title="Kokoro TTS Worker (hexgrad)")
 _pipeline = None
 _sample_rate = 24000
 
@@ -69,39 +54,41 @@ def _split_text(text: str, max_chars: int = KOKORO_MAX_CHARS) -> list[str]:
     return parts
 
 
-def _ensure_model_files() -> tuple[str, str]:
-    model_path = Path(KOKORO_MODEL_PATH)
-    voices_path = Path(KOKORO_VOICES_PATH)
-    model_path.parent.mkdir(parents=True, exist_ok=True)
+def _synthesize_part(text: str, voice: str):
+    import numpy as np
 
-    if not model_path.is_file():
-        _download_file(MODEL_URL, model_path)
-    if not voices_path.is_file():
-        _download_file(VOICES_URL, voices_path)
-
-    return str(model_path), str(voices_path)
-
-
-def _download_file(url: str, dest: Path) -> None:
-    import urllib.request
-
-    print(f"Downloading {url} -> {dest}")
-    urllib.request.urlretrieve(url, dest)
+    chunks: list[np.ndarray] = []
+    for _gs, _ps, audio in _pipeline(text, voice=voice):
+        chunks.append(np.asarray(audio, dtype=np.float32))
+    if not chunks:
+        return np.array([], dtype=np.float32)
+    return np.concatenate(chunks)
 
 
 @app.on_event("startup")
 def load_model() -> None:
     global _pipeline
-    from kokoro_onnx import Kokoro
+    from kokoro import KPipeline
 
-    model_path, voices_path = _ensure_model_files()
-    _pipeline = Kokoro(model_path, voices_path)
+    logger.info(
+        "Loading %s lang_code=%s voice=%s",
+        KOKORO_MODEL_ID,
+        KOKORO_LANG_CODE,
+        KOKORO_VOICE,
+    )
+    _pipeline = KPipeline(lang_code=KOKORO_LANG_CODE)
+    # Warm-up: triggers Hugging Face weight download on first start.
+    list(_pipeline("Ready.", voice=KOKORO_VOICE))
+    logger.info("Kokoro pipeline ready")
 
 
 @app.get("/health")
 def health() -> dict[str, str | int | bool]:
     return {
         "status": "ok",
+        "backend": "hexgrad/kokoro",
+        "model": KOKORO_MODEL_ID,
+        "lang_code": KOKORO_LANG_CODE,
         "voice": KOKORO_VOICE,
         "sample_rate": _sample_rate,
         "model_loaded": _pipeline is not None,
@@ -119,35 +106,22 @@ def _create_audio(text: str, voice: str):
     if not parts:
         return np.array([], dtype=np.float32), _sample_rate
 
-    arrays = []
-    rate = _sample_rate
+    arrays: list[np.ndarray] = []
     for part in parts:
         try:
-            samples, rate = _pipeline.create(
-                part,
-                voice=voice,
-                speed=1.0,
-                lang=KOKORO_LANG,
-            )
-            arrays.append(np.asarray(samples, dtype=np.float32))
-        except (IndexError, ValueError) as exc:
+            arrays.append(_synthesize_part(part, voice))
+        except Exception as exc:
             logger.warning("TTS chunk failed (%s), splitting smaller: %s", exc, part[:80])
             for sub in re.split(r"(?<=[,;])\s+", part):
                 sub = sub.strip()
                 if not sub:
                     continue
                 for tiny in _split_text(sub, max_chars=max(60, KOKORO_MAX_CHARS // 2)):
-                    samples, rate = _pipeline.create(
-                        tiny,
-                        voice=voice,
-                        speed=1.0,
-                        lang=KOKORO_LANG,
-                    )
-                    arrays.append(np.asarray(samples, dtype=np.float32))
+                    arrays.append(_synthesize_part(tiny, voice))
 
     if not arrays:
-        return np.array([], dtype=np.float32), rate
-    return np.concatenate(arrays), rate
+        return np.array([], dtype=np.float32), _sample_rate
+    return np.concatenate(arrays), _sample_rate
 
 
 @app.post("/synthesize")

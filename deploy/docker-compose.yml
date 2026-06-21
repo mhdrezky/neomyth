@@ -1,7 +1,8 @@
 # Root orchestration — use profiles to start subsets
 #
-# Workers only:  docker compose --profile workers up -d
-# Full stack:    docker compose --profile full up -d
+# Default workers:     docker compose --profile workers up -d        (tiny STT :5002)
+# Large-v3 STT stack:  docker compose --profile stt-large up -d   (large STT :5004)
+# Full stack:          docker compose --profile full up -d
 
 services:
   vllm-llm:
@@ -47,6 +48,26 @@ services:
     volumes:
       - whisper-cache:/root/.cache
 
+  whisper-large-v3:
+    profiles: [stt-large, workers-large]
+    build: ./whisper-large-v3
+    container_name: whisper-large-v3
+    restart: unless-stopped
+    ports:
+      - "${WHISPER_LARGE_PORT:-5004}:8000"
+    env_file:
+      - ./whisper-large-v3/.env
+    volumes:
+      - whisper-large-cache:/root/.cache
+    shm_size: "2gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
   kokoro-tts:
     profiles: [workers, full]
     build: ./kokoro-tts
@@ -84,4 +105,5 @@ services:
 volumes:
   hf-cache:
   whisper-cache:
+  whisper-large-cache:
   kokoro-cache:

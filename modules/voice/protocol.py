@@ -21,6 +21,7 @@ class ServerMessageType(StrEnum):
     TTS_AUDIO = "tts_audio"
     STATE = "state"
     ERROR = "error"
+    CONFIG = "config"
     PONG = "pong"
 
 
@@ -48,6 +49,10 @@ class ServerMessage(BaseModel):
     @classmethod
     def llm_delta(cls, text: str) -> "ServerMessage":
         return cls(type=ServerMessageType.LLM_DELTA, data={"text": text})
+
+    @classmethod
+    def config(cls, **data: Any) -> "ServerMessage":
+        return cls(type=ServerMessageType.CONFIG, data=data)
 
     @classmethod
     def tts_audio(cls, audio_b64: str, sample_rate: int) -> "ServerMessage":

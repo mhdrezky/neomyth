@@ -9,6 +9,8 @@ services:
       - .env
     volumes:
       - kokoro-cache:/root/.cache
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
 
 volumes:
   kokoro-cache:

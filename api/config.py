@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     tts_base_url: str = "http://localhost:5003"
     tts_voice: str = "af_sarah"
 
+    # Smart interruption (barge-in while AI speaks). Default off.
+    voice_interrupt_enabled: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -48,7 +48,15 @@ def _create_pipeline() -> VoicePipeline:
 
 @router.get("/voice", response_class=HTMLResponse)
 async def voice_ui(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "voice.html", {"request": request})
+    settings = get_settings()
+    return templates.TemplateResponse(
+        request,
+        "voice.html",
+        {
+            "request": request,
+            "interrupt_enabled": settings.voice_interrupt_enabled,
+        },
+    )
 
 
 @router.get("/voice/health")
@@ -73,6 +81,8 @@ async def voice_debug(request: Request) -> dict[str, str]:
 @router.websocket("/ws/voice")
 async def voice_websocket(websocket: WebSocket) -> None:
     await websocket.accept()
+    settings = get_settings()
+    interrupt_enabled = settings.voice_interrupt_enabled
     pipeline = _create_pipeline()
     audio_buffer = bytearray()
     turn_task: asyncio.Task[None] | None = None
@@ -102,6 +112,9 @@ async def voice_websocket(websocket: WebSocket) -> None:
 
     listening_event = pipeline.set_listening()
     await websocket.send_json(
+        ServerMessage.config(interrupt_enabled=interrupt_enabled).model_dump()
+    )
+    await websocket.send_json(
         _pipeline_event_to_server_message(
             listening_event.type,
             listening_event.data,
@@ -126,11 +139,12 @@ async def voice_websocket(websocket: WebSocket) -> None:
                 continue
 
             if msg.type in (ClientMessageType.SPEECH_START, ClientMessageType.INTERRUPT):
-                await cancel_active_turn()
-                audio_buffer.clear()
-                await websocket.send_json(
-                    ServerMessage.state("listening").model_dump()
-                )
+                if interrupt_enabled:
+                    await cancel_active_turn()
+                    audio_buffer.clear()
+                    await websocket.send_json(
+                        ServerMessage.state("listening").model_dump()
+                    )
                 continue
 
             if msg.type == ClientMessageType.SPEECH_END:

@@ -1,0 +1,22 @@
+services:
+  whisper-large-v3:
+    build: .
+    container_name: whisper-large-v3
+    restart: unless-stopped
+    ports:
+      - "${WHISPER_PORT:-5004}:8000"
+    env_file:
+      - .env
+    volumes:
+      - whisper-large-cache:/root/.cache
+    shm_size: "2gb"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  whisper-large-cache:

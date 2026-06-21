@@ -90,7 +90,7 @@
 <body>
   <div class="card">
     <h1>Neomyth Voice</h1>
-    <p class="subtitle">Real-time STT → LLM → TTS with interruption</p>
+    <p class="subtitle">Real-time STT → LLM → TTS{% if interrupt_enabled %} with interruption{% endif %}</p>
 
     <div class="status-row">
       <div id="phaseDot" class="dot"></div>
@@ -100,6 +100,7 @@
     <div class="metrics">
       <div>Latency: <strong id="latency">—</strong></div>
       <div>WS: <strong id="wsStatus">off</strong></div>
+      <div>Interrupt: <strong id="interruptStatus">{{ "on" if interrupt_enabled else "off" }}</strong></div>
     </div>
 
     <button id="startBtn">Start Session</button>
@@ -109,6 +110,9 @@
     <div class="error" id="error"></div>
   </div>
 
+  <script>
+    window.NEOMYTH_VOICE = { interruptEnabled: {{ "true" if interrupt_enabled else "false" }} };
+  </script>
   <script src="/static/voice-client.js"></script>
 </body>
 </html>
