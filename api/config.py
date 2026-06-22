@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     )
 
     api_host: str = "0.0.0.0"
-    api_port: int = 8080
+    api_port: int = 5000
+
+    cors_origins: list[str] = ["http://localhost:4321"]
 
     vllm_base_url: str = "http://localhost:5001/v1"
     vllm_model: str = "qwen-3.5"

@@ -4,11 +4,12 @@ Guide for AI agents (Cursor, Copilot, etc.) working in the **neomyth** monorepo.
 
 ## Project overview
 
-Neomyth is a multi-module monorepo for AI applications. The architecture separates three layers:
+Neomyth is a multi-module monorepo for AI applications. The architecture separates four layers:
 
-1. **`api/`** — FastAPI gateway (transport: HTTP, WebSocket, templates, static)
-2. **`modules/`** — Core AI logic (orchestration, graph, HTTP clients to workers)
-3. **`deploy/`** — Docker workers (model loading, inference, GPU)
+1. **`web/`** — Astro frontend (SSG, shadcn/ui, SEO)
+2. **`api/`** — FastAPI gateway (transport: HTTP JSON, WebSocket)
+3. **`modules/`** — Core AI logic (orchestration, graph, HTTP clients to workers)
+4. **`deploy/`** — Docker workers (model loading, inference, GPU)
 
 **Active module:** `voice` (AI Voice Lite — STT → LLM → TTS, WebSocket full-duplex).
 
@@ -24,13 +25,16 @@ neomyth/
 ├── .env.example                # runtime env template (URLs, ports)
 ├── README.md
 │
+├── web/                        # Astro frontend — SSG, shadcn/ui
+│   ├── src/pages/              # landing, /voice
+│   ├── src/components/ui/      # shadcn components
+│   └── public/                 # robots.txt, llms.txt
+│
 ├── api/                        # FastAPI gateway — transport only
 │   ├── main.py
 │   ├── config.py               # pydantic-settings from .env
-│   ├── routers/
-│   │   └── voice.py
-│   ├── templates/
-│   └── static/
+│   └── routers/
+│       └── voice.py
 │
 ├── modules/                    # core AI — no FastAPI, no model loading
 │   ├── shared/                 # cross-module utils & tunable constants
@@ -66,7 +70,7 @@ neomyth/
 
 | Layer | Responsibility | Allowed imports | Forbidden |
 |-------|----------------|-----------------|-----------|
-| `api/` | Routing, WS I/O, templates, static, runtime config | `modules.*`, FastAPI stack | Business AI logic, ML libs (`faster-whisper`, `kokoro`) |
+| `api/` | Routing, WS I/O, CORS, runtime config | `modules.*`, FastAPI stack | Business AI logic, ML libs, HTML/UI |
 | `modules/shared/` | Shared constants, pure utils, shared types | stdlib, generic libs (no module-specific) | Import from `modules/voice` or other feature modules |
 | `modules/<name>/` | Orchestration, graph, protocol, worker HTTP clients | `modules.shared`, `httpx`, `openai` | FastAPI routes, direct model loading |
 | `deploy/<worker>/` | Thin FastAPI inference worker, Dockerfile | ML libs for that worker only | Orchestration graph, imports from `modules/` |
@@ -93,8 +97,8 @@ Worker-specific env lives in `deploy/<worker>/.env.example` (e.g. `WHISPER_MODEL
 ## Voice module pipeline
 
 ```text
-Browser (WebSocket)
-  → api/routers/voice.py
+Browser (Astro web/)
+  → WebSocket → api/routers/voice.py
   → modules/voice/pipeline.py
       → modules/voice/clients/stt.py  → deploy/whisper-stt
       → modules/voice/clients/llm.py  → deploy/vllm-llm (OpenAI-compatible)
@@ -125,7 +129,7 @@ All text written into the codebase must be in **English**. This includes:
 - Code comments, docstrings, and type-hint descriptions
 - Documentation (`README.md`, `docs/`, `AGENTS.md`)
 - Config and deploy comments (`.env.example`, `docker-compose.yml`, worker env templates)
-- User-facing copy (API error messages, WebSocket protocol fields, HTML templates)
+- User-facing copy (WebSocket protocol fields, `web/` UI strings)
 - Variable names, function names, and log messages (already English by convention — keep it consistent)
 
 Do not add Indonesian or other non-English prose in source files unless it is intentional product copy for a localized feature (e.g. a language-specific TTS prompt). Even then, keep code structure, comments, and docs in English.
@@ -149,13 +153,16 @@ cd deploy/kokoro-tts && docker compose up -d
 
 # API (local)
 cp .env.example .env
-uv run uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload
+uv run uvicorn api.main:app --host 0.0.0.0 --port 5000 --reload
+
+# Frontend
+cd web && npm install && npm run dev
 
 # Or full stack
 cd deploy && docker compose --profile full up -d
 ```
 
-Voice UI: `http://localhost:8080/voice`
+Landing: `http://localhost:4321` · Neo-Voice: `http://localhost:4321/voice`
 
 On Windows Docker, API may need `host.docker.internal` to reach workers from containers.
 
@@ -172,6 +179,7 @@ On Windows Docker, API may need `host.docker.internal` to reach workers from con
 
 | Task | Work in |
 |------|---------|
+| Landing, SEO, shadcn UI | `web/` |
 | New HTTP/WebSocket endpoint | `api/routers/`, `api/main.py` |
 | Pipeline / graph / interrupt logic | `modules/voice/` |
 | Shared chunking, audio, HTTP helpers | `modules/shared/` |

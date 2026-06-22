@@ -1,6 +1,11 @@
 # Environment
 .env
 
+# Web (Astro)
+web/node_modules/
+web/dist/
+web/.env
+
 # Python
 __pycache__/
 *.py[oc]

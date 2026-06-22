@@ -6,19 +6,19 @@ AI Voice Lite module: full-duplex WebSocket voice assistant with STT → LLM →
 
 ```mermaid
 sequenceDiagram
-    participant Browser
+    participant Web as web_VoiceApp
     participant API as api_routers_voice
     participant Pipe as modules_voice_pipeline
     participant STT as whisper_stt
     participant LLM as vllm_llm
     participant TTS as kokoro_tts
 
-    Browser->>API: audio_chunk + speech_end
+    Web->>API: audio_chunk + speech_end
     API->>Pipe: handle_speech_end
     Pipe->>STT: POST /transcribe
     STT-->>Pipe: transcript
     Pipe-->>API: stt_final
-    API-->>Browser: stt_final
+    API-->>Web: stt_final
     Pipe->>LLM: chat stream
     loop tokens
         LLM-->>Pipe: delta
@@ -28,9 +28,9 @@ sequenceDiagram
         Pipe->>TTS: POST /synthesize
         TTS-->>Pipe: pcm chunk
         Pipe-->>API: tts_audio
-        API-->>Browser: tts_audio
+        API-->>Web: tts_audio
     end
-    Browser->>API: interrupt
+    Web->>API: interrupt
     API->>Pipe: cancel
 ```
 
@@ -44,13 +44,15 @@ Target end-to-end: **&lt;1.2s** from `speech_end` to first `tts_audio`.
 | LLM first token | 150–300 ms | `deploy/vllm-llm` (Qwen3.5-0.8B) |
 | TTS first chunk | 200–400 ms | `deploy/kokoro-tts` (sentence chunking) |
 | HTTP hops | 15–45 ms | Docker internal network |
-| VAD + WebSocket | 100–200 ms | Browser (`voice-client.js`) |
+| VAD + WebSocket | 100–200 ms | `web/src/components/VoiceApp.tsx` |
 
 ## Layer responsibilities
 
 | Path | Responsibility |
 |------|----------------|
-| `api/routers/voice.py` | WebSocket I/O, UI route |
+| `web/src/pages/voice/` | Neo-Voice UI shell (SEO) |
+| `web/src/components/VoiceApp.tsx` | Mic, VAD, WebSocket client (hydrated) |
+| `api/routers/voice.py` | WebSocket I/O, health, debug |
 | `modules/voice/pipeline.py` | Orchestration, cancellation, chunking |
 | `modules/voice/graph.py` | Conversation state & history |
 | `modules/voice/clients/` | HTTP/OpenAI clients to workers |
@@ -67,7 +69,7 @@ Target end-to-end: **&lt;1.2s** from `speech_end` to first `tts_audio`.
 
 ## Benchmarking latency
 
-1. Open `http://localhost:8080/voice`
+1. Open `http://localhost:4321/voice`
 2. Start session and speak a short phrase
 3. UI shows **Latency** badge: time from `speech_end` to first `tts_audio`
 
@@ -92,6 +94,7 @@ For repeatable tests, use consistent phrase length and ensure workers are warm (
 | `stt_final` | `{ "text": "..." }` |
 | `llm_delta` | `{ "text": "..." }` |
 | `tts_audio` | `{ "audio": "<base64>", "sample_rate": 16000 }` |
+| `config` | `{ "interrupt_enabled": true|false }` |
 | `state` | `{ "phase": "listening|thinking|speaking" }` |
 | `error` | `{ "message": "..." }` |
 

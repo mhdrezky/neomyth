@@ -1,0 +1,86 @@
+---
+import { modules, faqItems } from "@/data/modules";
+import { siteConfig } from "@/config/site";
+
+interface Props {
+  type: "home" | "voice";
+}
+
+const { type } = Astro.props as Props;
+---
+
+{type === "home" && (
+  <script type="application/ld+json" set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        name: siteConfig.name,
+        url: siteConfig.url,
+        description: siteConfig.description,
+      },
+      {
+        "@type": "Organization",
+        name: siteConfig.name,
+        url: siteConfig.url,
+        description: siteConfig.description,
+      },
+      {
+        "@type": "ItemList",
+        name: "Neomyth AI Modules",
+        itemListElement: modules.map((mod, i) => ({
+          "@type": "ListItem",
+          position: i + 1,
+          name: mod.name,
+          description: mod.description,
+          url: mod.href ? new URL(mod.href, siteConfig.url).href : undefined,
+        })),
+      },
+      {
+        "@type": "FAQPage",
+        mainEntity: faqItems.map((item) => ({
+          "@type": "Question",
+          name: item.question,
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: item.answer,
+          },
+        })),
+      },
+    ],
+  })} />
+)}
+
+{type === "voice" && (
+  <script type="application/ld+json" set:html={JSON.stringify({
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        name: "Neo-Voice",
+        applicationCategory: "MultimediaApplication",
+        operatingSystem: "Web",
+        description:
+          "Real-time voice assistant with speech-to-text, LLM reasoning, and text-to-speech.",
+        url: new URL("/voice", siteConfig.url).href,
+      },
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          {
+            "@type": "ListItem",
+            position: 1,
+            name: "Home",
+            item: siteConfig.url,
+          },
+          {
+            "@type": "ListItem",
+            position: 2,
+            name: "Neo-Voice",
+            item: new URL("/voice", siteConfig.url).href,
+          },
+        ],
+      },
+    ],
+  })} />
+)}

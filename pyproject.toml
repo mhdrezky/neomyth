@@ -10,7 +10,6 @@ dependencies = [
     "pydantic-settings>=2.6",
     "openai>=1.55",
     "httpx>=0.28",
-    "jinja2>=3.1",
     "langgraph>=0.2",
 ]
 

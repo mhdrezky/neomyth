@@ -2,11 +2,8 @@
 
 import asyncio
 import base64
-from pathlib import Path
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 
 from api.config import get_settings
 from modules.shared.types import PipelineEventType
@@ -19,7 +16,6 @@ from modules.voice.protocol import (
 )
 
 router = APIRouter(tags=["voice"])
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
 def _pipeline_event_to_server_message(event_type: PipelineEventType, data: dict) -> ServerMessage:
@@ -43,19 +39,6 @@ def _create_pipeline() -> VoicePipeline:
         tts_voice=settings.tts_voice,
         llm_max_tokens=settings.vllm_max_tokens,
         llm_temperature=settings.vllm_temperature,
-    )
-
-
-@router.get("/voice", response_class=HTMLResponse)
-async def voice_ui(request: Request) -> HTMLResponse:
-    settings = get_settings()
-    return templates.TemplateResponse(
-        request,
-        "voice.html",
-        {
-            "request": request,
-            "interrupt_enabled": settings.voice_interrupt_enabled,
-        },
     )
 
 

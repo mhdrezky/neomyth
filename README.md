@@ -1,98 +1,100 @@
 # Neomyth
 
-Multi-module AI monorepo with a centralized FastAPI gateway and Docker inference workers.
+Multi-module AI monorepo with an Astro frontend, FastAPI gateway, and Docker inference workers.
 
 ## Architecture
 
 ```text
-Browser  →  api/ (FastAPI)  →  modules/voice/ (orchestration)
-                                    ↓
-              deploy/vllm-llm · whisper-stt · kokoro-tts (workers)
+Browser  →  web/ (Astro)     landing + Neo-Voice UI
+         →  api/ (FastAPI)   WebSocket + JSON API
+         →  modules/voice/   orchestration
+                ↓
+         deploy/vllm-llm · whisper-stt · kokoro-tts (workers)
 ```
 
 | Layer | Path | Role |
 |-------|------|------|
-| Gateway | `api/` | HTTP, WebSocket, UI |
+| Frontend | `web/` | Astro SSG, shadcn/ui, SEO |
+| Gateway | `api/` | HTTP JSON, WebSocket |
 | Core AI | `modules/voice/` | Pipeline, graph, worker clients |
 | Shared | `modules/shared/` | Constants, utils |
 | Workers | `deploy/*/` | STT, LLM, TTS inference |
 
-See [AGENTS.md](AGENTS.md) for agent/developer conventions and [docs/neomyth-voice/architecture.md](docs/neomyth-voice/architecture.md) for the voice pipeline.
+See [AGENTS.md](AGENTS.md) and [docs/neomyth-voice/architecture.md](docs/neomyth-voice/architecture.md).
 
 ## Prerequisites
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
+- Python 3.12+ and [uv](https://docs.astral.sh/uv/)
+- Node.js 20+ and npm
 - Docker with NVIDIA GPU support (recommended)
-- Microphone + speakers for voice UI
+- Microphone + speakers for Neo-Voice
 
 ## Quick start
 
 ### 1. Workers
 
 ```bash
-# LLM (existing)
-cd deploy/vllm-llm
-cp .env.example .env   # if needed
-docker compose up -d
-
-# STT + TTS
-cd ../whisper-stt && cp .env.example .env && docker compose up -d
-cd ../kokoro-tts && cp .env.example .env && docker compose up -d
+cd deploy/vllm-llm && docker compose up -d
+cd ../whisper-large-v3 && docker compose up -d
+cd ../kokoro-tts && docker compose up -d
 ```
 
-Or orchestrate all workers:
+Or: `cd deploy && docker compose --profile workers up -d`
 
-```bash
-cd deploy
-cp vllm-llm/.env.example vllm-llm/.env
-cp whisper-stt/.env.example whisper-stt/.env
-cp kokoro-tts/.env.example kokoro-tts/.env
-docker compose --profile workers up -d
-```
-
-### 2. API (local)
+### 2. API
 
 ```bash
 cp .env.example .env
 uv sync
-uv run uvicorn api.main:app --host 0.0.0.0 --port 8080 --reload
+uv run uvicorn api.main:app --host 0.0.0.0 --port 5000 --reload
 ```
 
-Open **http://localhost:8080/voice**
-
-### 3. Full Docker stack
+### 3. Frontend
 
 ```bash
-cd deploy
-docker compose --profile full up -d
+cd web
+cp .env.example .env
+npm install
+npm run dev
 ```
+
+- Landing: **http://localhost:4321**
+- Neo-Voice: **http://localhost:4321/voice** (WebSocket → API on port 5000)
 
 ## Environment
 
-Root `.env.example` — API and worker URLs for local dev:
-
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `API_PORT` | `5000` | FastAPI port |
+| `PUBLIC_API_BASE_URL` | `http://localhost:5000` | API URL for web (in `web/.env`) |
+| `PUBLIC_SITE_URL` | `http://localhost:4321` | Site URL for SEO/sitemap |
 | `VLLM_BASE_URL` | `http://localhost:5001/v1` | vLLM OpenAI API |
-| `VLLM_MODEL` | `qwen-3.5` | Served model name |
-| `STT_BASE_URL` | `http://localhost:5002` | Whisper worker |
+| `STT_BASE_URL` | `http://localhost:5004` | Whisper worker |
 | `TTS_BASE_URL` | `http://localhost:5003` | Kokoro worker |
 
-## Endpoints
+## API endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/` | API info JSON |
 | GET | `/health` | API health |
-| GET | `/voice` | Voice test UI |
 | GET | `/voice/health` | Worker connectivity |
-| POST | `/voice/debug` | STT→LLM chain (raw WAV/PCM body) |
+| POST | `/voice/debug` | STT→LLM chain (raw audio body) |
 | WS | `/ws/voice` | Real-time voice session |
+
+## Web — shadcn/ui
+
+```bash
+cd web
+npx shadcn@latest add <component>
+```
+
+Static pages use shadcn without `client:*`. Interactive islands use `client:load`.
 
 ## Modules
 
-- **voice** (active) — AI Voice Lite with interruption handling
-- **future modules** — add `modules/<name>/` + `api/routers/<name>.py`
+- **Neo-Voice** (active) — real-time voice assistant
+- **Neo-Parse**, **Neo-Spec** — coming soon (landing cards only)
 
 ## License
 

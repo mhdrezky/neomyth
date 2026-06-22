@@ -1,0 +1,26 @@
+---
+import "@/styles/globals.css";
+import MetaTags from "@/components/seo/MetaTags.astro";
+
+interface Props {
+  title?: string;
+  description?: string;
+  canonical?: string;
+  noindex?: boolean;
+}
+
+const { title, description, canonical, noindex } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <MetaTags title={title} description={description} canonical={canonical} noindex={noindex} />
+  </head>
+  <body class="min-h-screen">
+    <slot />
+  </body>
+</html>

@@ -9,8 +9,8 @@ COPY modules/ ./modules/
 RUN pip install --no-cache-dir .
 
 ENV API_HOST=0.0.0.0
-ENV API_PORT=8080
+ENV API_PORT=5000
 
-EXPOSE 8080
+EXPOSE 5000
 
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "5000"]

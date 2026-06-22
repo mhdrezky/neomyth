@@ -1,0 +1,18 @@
+# Neomyth
+
+> Modular AI toolkit — voice, document parsing, and specification tools.
+
+## Available tools
+
+- Neo-Voice: Real-time voice assistant (STT → LLM → TTS). URL: /voice
+
+## Coming soon
+
+- Neo-Parse: Extract structure and insights from documents.
+- Neo-Spec: Generate and refine technical specifications with AI.
+
+## Getting started
+
+1. Run Docker workers (vLLM, Whisper STT, Kokoro TTS).
+2. Start the Neomyth API on port 5000.
+3. Open the web app and select Neo-Voice.
