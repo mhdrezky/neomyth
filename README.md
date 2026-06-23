@@ -20,7 +20,7 @@ Browser  →  web/ (Astro)     landing + Neo-Voice UI
 | Shared | `modules/shared/` | Constants, utils |
 | Workers | `deploy/*/` | STT, LLM, TTS inference |
 
-See [AGENTS.md](AGENTS.md) and [docs/neomyth-voice/architecture.md](docs/neomyth-voice/architecture.md).
+See [AGENTS.md](AGENTS.md), [docs/ui-layout-guide.md](docs/ui-layout-guide.md), and [docs/neomyth-voice/architecture.md](docs/neomyth-voice/architecture.md).
 
 ## Prerequisites
 
@@ -90,6 +90,8 @@ npx shadcn@latest add <component>
 ```
 
 Static pages use shadcn without `client:*`. Interactive islands use `client:load`.
+
+New tool pages must follow [docs/ui-layout-guide.md](docs/ui-layout-guide.md) (`ToolPageLayout`, `ToolControlPanel`).
 
 ## Modules
 

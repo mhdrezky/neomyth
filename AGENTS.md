@@ -26,8 +26,14 @@ neomyth/
 ├── README.md
 │
 ├── web/                        # Astro frontend — SSG, shadcn/ui
-│   ├── src/pages/              # landing, /voice
-│   ├── src/components/ui/      # shadcn components
+│   ├── src/layouts/
+│   │   ├── BaseLayout.astro
+│   │   └── ToolPageLayout.astro  # all tool pages (/voice, future tools)
+│   ├── src/pages/              # landing (/), tools (/voice, …)
+│   ├── src/components/
+│   │   ├── ToolControlPanel.tsx
+│   │   ├── ChatMessages.tsx
+│   │   └── ui/                 # shadcn primitives
 │   └── public/                 # robots.txt, llms.txt
 │
 ├── api/                        # FastAPI gateway — transport only
@@ -62,9 +68,22 @@ neomyth/
 │   └── api/                    # optional Docker image for api layer
 │
 └── docs/
+    ├── ui-layout-guide.md      # tool page UI standard (required for new tools)
     └── neomyth-voice/
         └── architecture.md
 ```
+
+## Frontend UI (tool pages)
+
+All tool routes (`/voice`, future `/parse`, `/spec`, …) **must** use [`ToolPageLayout.astro`](web/src/layouts/ToolPageLayout.astro). See **[docs/ui-layout-guide.md](docs/ui-layout-guide.md)** for:
+
+- Page shell (back link, h1, description)
+- `ToolControlPanel` + work area stack
+- `ChatMessages` for conversational UIs
+- Page-level scroll and hydration rules
+- Checklist for adding a new tool
+
+Landing (`/`) keeps its own marketing layout — do not use `ToolPageLayout` there.
 
 ## Layer boundaries (strict)
 
@@ -103,7 +122,7 @@ Browser (Astro web/)
       → modules/voice/clients/stt.py  → deploy/whisper-stt
       → modules/voice/clients/llm.py  → deploy/vllm-llm (OpenAI-compatible)
       → modules/voice/clients/tts.py  → deploy/kokoro-tts
-      → modules/voice/graph.py        (conversation state)
+      → modules/voice/graph.py        (LangGraph STT→LLM→TTS, MemorySaver)
       → modules/shared/utils/*        (chunking, audio helpers)
 ```
 
@@ -180,6 +199,7 @@ On Windows Docker, API may need `host.docker.internal` to reach workers from con
 | Task | Work in |
 |------|---------|
 | Landing, SEO, shadcn UI | `web/` |
+| **New tool page UI** | `web/src/layouts/ToolPageLayout.astro`, `docs/ui-layout-guide.md` |
 | New HTTP/WebSocket endpoint | `api/routers/`, `api/main.py` |
 | Pipeline / graph / interrupt logic | `modules/voice/` |
 | Shared chunking, audio, HTTP helpers | `modules/shared/` |
@@ -191,4 +211,4 @@ On Windows Docker, API may need `host.docker.internal` to reach workers from con
 
 - End-to-end voice latency target: **&lt;1.2s** (speech end → first TTS audio).
 - Full-duplex WebSocket with **smart interruption** when user speaks during AI playback.
-- Structured conversation context via lightweight graph in `modules/voice/graph.py`.
+- Structured conversation context via LangGraph in `modules/voice/graph.py` (in-memory checkpoint per WebSocket session).

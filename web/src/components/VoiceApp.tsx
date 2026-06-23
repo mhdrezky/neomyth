@@ -1,15 +1,11 @@
 import { useCallback, useRef, useState } from "react";
+import { Mic, MicOff } from "lucide-react";
 
+import { ChatMessages, type ChatMessage } from "@/components/ChatMessages";
+import { ToolControlPanel } from "@/components/ToolControlPanel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { apiBaseUrl } from "@/config/site";
 import { cn } from "@/lib/utils";
 
@@ -84,7 +80,8 @@ export default function VoiceApp() {
   const [wsStatus, setWsStatus] = useState("off");
   const [interruptEnabled, setInterruptEnabled] = useState(false);
   const [latency, setLatency] = useState("—");
-  const [transcript, setTranscript] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [streamingAssistant, setStreamingAssistant] = useState("");
   const [error, setError] = useState("");
   const [sessionActive, setSessionActive] = useState(false);
 
@@ -175,13 +172,26 @@ export default function VoiceApp() {
     [drainPlayback],
   );
 
-  const logLine = useCallback((prefix: string, text: string) => {
-    setTranscript((prev) => `${prev}${prefix}: ${text}\n`);
+  const addUserMessage = useCallback((text: string) => {
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role: "user", content: text },
+    ]);
+    setStreamingAssistant("");
+  }, []);
+
+  const finalizeAssistantMessage = useCallback((text: string) => {
+    setMessages((prev) => [
+      ...prev,
+      { id: crypto.randomUUID(), role: "assistant", content: text },
+    ]);
+    setStreamingAssistant("");
   }, []);
 
   const interruptAI = useCallback(() => {
     playbackEpochRef.current += 1;
     assistantBufferRef.current = "";
+    setStreamingAssistant("");
     stopAllAudio();
     send({ type: "interrupt", data: {} });
     setPhaseState("listening");
@@ -204,18 +214,20 @@ export default function VoiceApp() {
       }
 
       if (msg.type === "stt_final") {
-        logLine("You", msg.data.text || "");
+        addUserMessage(msg.data.text || "");
         return;
       }
 
       if (msg.type === "llm_delta") {
-        assistantBufferRef.current += msg.data.text || "";
+        const next = assistantBufferRef.current + (msg.data.text || "");
+        assistantBufferRef.current = next;
+        setStreamingAssistant(next);
         return;
       }
 
       if (msg.type === "tts_audio") {
         if (assistantBufferRef.current.trim()) {
-          logLine("AI", assistantBufferRef.current.trim());
+          finalizeAssistantMessage(assistantBufferRef.current.trim());
           assistantBufferRef.current = "";
         }
         if (latencyStartRef.current > 0) {
@@ -243,7 +255,7 @@ export default function VoiceApp() {
         }
       }
     },
-    [logLine, playPcmChunk, setPhaseState],
+    [addUserMessage, finalizeAssistantMessage, playPcmChunk, setPhaseState],
   );
 
   const onAudioProcess = useCallback(
@@ -296,7 +308,8 @@ export default function VoiceApp() {
 
   const startSession = async () => {
     setError("");
-    setTranscript("");
+    setMessages([]);
+    setStreamingAssistant("");
     assistantBufferRef.current = "";
     playbackEpochRef.current = 0;
     setLatency("—");
@@ -342,12 +355,8 @@ export default function VoiceApp() {
   };
 
   return (
-    <Card className="w-full max-w-lg">
-      <CardHeader>
-        <CardTitle>Voice session</CardTitle>
-        <CardDescription>Speak naturally — STT → LLM → TTS</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <div className="space-y-4">
+      <ToolControlPanel>
         <div className="flex items-center gap-3">
           <span
             className={cn(
@@ -366,45 +375,40 @@ export default function VoiceApp() {
           <span>
             WS: <strong className="text-foreground">{wsStatus}</strong>
           </span>
-          <span>
-            Interrupt:{" "}
-            <Badge variant="outline" className="ml-1">
-              {interruptEnabled ? "on" : "off"}
-            </Badge>
+          <span className="flex items-center gap-2">
+            Interrupt:
+            <Badge variant="outline">{interruptEnabled ? "on" : "off"}</Badge>
           </span>
         </div>
 
         <div className="flex flex-col gap-2 sm:flex-row">
           <Button
-            className="flex-1"
+            className="flex-1 gap-2"
             disabled={sessionActive}
             onClick={() => startSession().catch((err) => setError(String(err)))}
           >
+            <Mic className="h-4 w-4" aria-hidden />
             Start Session
           </Button>
           <Button
-            className="flex-1"
+            className="flex-1 gap-2"
             variant="destructive"
             disabled={!sessionActive}
             onClick={stopSession}
           >
+            <MicOff className="h-4 w-4" aria-hidden />
             Stop Session
           </Button>
         </div>
+      </ToolControlPanel>
 
-        <pre
-          className="min-h-[120px] whitespace-pre-wrap rounded-lg border bg-muted/30 p-4 text-sm leading-relaxed"
-          aria-live="polite"
-        >
-          {transcript || "Transcript will appear here…"}
-        </pre>
+      <ChatMessages messages={messages} streamingAssistant={streamingAssistant} />
 
-        {error && (
-          <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
-          </Alert>
-        )}
-      </CardContent>
-    </Card>
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+    </div>
   );
 }

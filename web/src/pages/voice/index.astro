@@ -1,39 +1,22 @@
 ---
-import BaseLayout from "@/layouts/BaseLayout.astro";
 import JsonLd from "@/components/seo/JsonLd.astro";
 import VoiceApp from "@/components/VoiceApp";
+import ToolPageLayout from "@/layouts/ToolPageLayout.astro";
 ---
 
-<BaseLayout
-  title="Neo-Voice — Neomyth"
-  description="Real-time voice assistant with speech-to-text, LLM reasoning, and text-to-speech."
+<ToolPageLayout
+  title="Neo-Voice"
+  description="Real-time voice assistant: your speech is transcribed with Whisper, answered by a local LLM, and read aloud with Kokoro TTS. Connects to the Neomyth API via WebSocket."
   canonical={new URL("/voice", import.meta.env.PUBLIC_SITE_URL ?? "http://localhost:4321").href}
 >
-  <JsonLd type="voice" />
+  <JsonLd type="voice" slot="head" />
 
-  <main class="mx-auto flex min-h-screen max-w-3xl flex-col px-6 py-12">
-    <nav class="mb-8">
-      <a href="/" class="text-sm text-muted-foreground hover:text-primary">
-        ← Back to Neomyth
-      </a>
-    </nav>
+  <VoiceApp client:load />
 
-    <header class="mb-8">
-      <h1 class="mb-3 text-3xl font-bold tracking-tight">Neo-Voice</h1>
-      <p class="text-muted-foreground">
-        Real-time voice assistant: your speech is transcribed with Whisper, answered
-        by a local LLM, and read aloud with Kokoro TTS. Connects to the Neomyth API
-        via WebSocket.
-      </p>
-    </header>
-
-    <VoiceApp client:load />
-
-    <noscript>
-      <p class="mt-6 rounded-lg border border-destructive/50 p-4 text-sm text-destructive">
-        JavaScript is required for the live voice session. Ensure workers and the
-        API server on port 5000 are running.
-      </p>
-    </noscript>
-  </main>
-</BaseLayout>
+  <noscript>
+    <p class="mt-6 text-sm text-destructive">
+      JavaScript is required for the live voice session. Ensure workers and the
+      API server on port 5000 are running.
+    </p>
+  </noscript>
+</ToolPageLayout>

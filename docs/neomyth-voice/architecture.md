@@ -54,7 +54,7 @@ Target end-to-end: **&lt;1.2s** from `speech_end` to first `tts_audio`.
 | `web/src/components/VoiceApp.tsx` | Mic, VAD, WebSocket client (hydrated) |
 | `api/routers/voice.py` | WebSocket I/O, health, debug |
 | `modules/voice/pipeline.py` | Orchestration, cancellation, chunking |
-| `modules/voice/graph.py` | Conversation state & history |
+| `modules/voice/graph.py` | LangGraph turn pipeline, session memory (MemorySaver) |
 | `modules/voice/clients/` | HTTP/OpenAI clients to workers |
 | `modules/shared/` | Audio/text utils, tunable constants |
 | `deploy/whisper-stt/` | Faster-Whisper inference |
