@@ -80,6 +80,23 @@ services:
     volumes:
       - kokoro-cache:/root/.cache
 
+  postgres:
+    profiles: [db, workers, full]
+    image: pgvector/pgvector:pg16
+    container_name: neomyth-postgres
+    restart: unless-stopped
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    env_file:
+      - ./postgres/.env
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-neomyth}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   neomyth-api:
     profiles: [full]
     build:
@@ -97,12 +114,19 @@ services:
       STT_BASE_URL: http://whisper-stt:8000
       TTS_BASE_URL: http://kokoro-tts:8000
       TTS_VOICE: ${KOKORO_VOICE:-af_sarah}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-neomyth}:${POSTGRES_PASSWORD:-neomyth}@postgres:5432/${POSTGRES_DB:-neomyth}
     depends_on:
-      - vllm-llm
-      - whisper-stt
-      - kokoro-tts
+      postgres:
+        condition: service_healthy
+      vllm-llm:
+        condition: service_started
+      whisper-stt:
+        condition: service_started
+      kokoro-tts:
+        condition: service_started
 
 volumes:
+  pg-data:
   hf-cache:
   whisper-cache:
   whisper-large-cache:

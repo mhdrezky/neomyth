@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # Smart interruption (barge-in while AI speaks). Default off.
     voice_interrupt_enabled: bool = False
 
+    # PostgreSQL
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/neomyth"
+
 
 @lru_cache
 def get_settings() -> Settings:
