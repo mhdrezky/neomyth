@@ -3,6 +3,7 @@ import { Mic, MicOff } from "lucide-react";
 
 import { ChatMessages, type ChatMessage } from "@/components/ChatMessages";
 import { ToolControlPanel } from "@/components/ToolControlPanel";
+import { ToolHeader } from "@/components/ToolHeader";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -355,7 +356,18 @@ export default function VoiceApp() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="flex h-full flex-col overflow-hidden">
+      <ToolHeader
+        title="Neo-Voice"
+        subtitle="STT → LLM → TTS · WebSocket"
+        icon={Mic}
+        iconGradient="linear-gradient(135deg, #7c3aed, #a78bfa)"
+        iconShadow="0 0 0 1px #5b21b6, 0 2px 8px rgba(124,58,237,.35)"
+        statusLabel={`ws: ${wsStatus}`}
+        statusActive={wsStatus === "on"}
+      />
+      <div className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-3xl space-y-4 px-6 py-8 pb-12">
       <ToolControlPanel>
         <div className="flex items-center gap-3">
           <span
@@ -409,6 +421,8 @@ export default function VoiceApp() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+        </div>
+      </div>
     </div>
   );
 }

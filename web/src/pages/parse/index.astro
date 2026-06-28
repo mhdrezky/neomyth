@@ -1,0 +1,31 @@
+---
+import JsonLd from "@/components/seo/JsonLd.astro";
+import ParseApp from "@/components/ParseApp";
+import ToolPageLayout from "@/layouts/ToolPageLayout.astro";
+---
+
+<ToolPageLayout
+  title="Neo-Parse"
+  description="Parse PDFs into clean Markdown and structured JSON with source grounding."
+  canonical={new URL("/parse", import.meta.env.PUBLIC_SITE_URL ?? "http://localhost:4321").href}
+  fullWidth
+>
+  <link
+    slot="head"
+    rel="preconnect"
+    href="https://fonts.googleapis.com"
+  />
+  <link
+    slot="head"
+    href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+
+  <ParseApp client:load />
+
+  <noscript>
+    <p class="mt-6 text-sm text-destructive">
+      JavaScript is required for the document parser.
+    </p>
+  </noscript>
+</ToolPageLayout>

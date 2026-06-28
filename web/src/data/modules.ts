@@ -31,10 +31,11 @@ export const modules: NeomythModule[] = [
     name: "Neo-Parse",
     description: "Extract structure and insights from documents.",
     longDescription:
-      "Neo-Parse will parse PDFs, markdown, and codebases into structured data for downstream AI workflows. Coming soon.",
-    status: "coming_soon",
+      "Neo-Parse parses PDFs into clean Markdown and structured JSON with source grounding — every extracted block traces back to its region in the original document.",
+    href: "/parse",
+    status: "available",
     icon: FileSearch,
-    accentClass: "text-muted-foreground border-border",
+    accentClass: "text-primary border-primary/40 hover:ring-primary/50",
   },
   {
     id: "neo-spec",

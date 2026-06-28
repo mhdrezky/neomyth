@@ -8,6 +8,7 @@ import ToolPageLayout from "@/layouts/ToolPageLayout.astro";
   title="Neo-Voice"
   description="Real-time voice assistant: your speech is transcribed with Whisper, answered by a local LLM, and read aloud with Kokoro TTS. Connects to the Neomyth API via WebSocket."
   canonical={new URL("/voice", import.meta.env.PUBLIC_SITE_URL ?? "http://localhost:4321").href}
+  fullWidth
 >
   <JsonLd type="voice" slot="head" />
 

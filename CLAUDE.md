@@ -1,8 +1,8 @@
-# AGENTS.md — Neomyth
+# CLAUDE.md — Neomyth
 
-Guide for AI agents (Cursor, Copilot, etc.) working in the **neomyth** monorepo.
+Guide for Claude (Claude Code, Cowork, etc.) working in the **neomyth** monorepo.
 
-> **Sync notice:** This file mirrors [`CLAUDE.md`](CLAUDE.md) (used by Claude Code / Cowork). Whenever one file is updated, update the other to keep Cursor and Claude in sync.
+> **Sync notice:** This file mirrors [`AGENTS.md`](AGENTS.md) (used by Cursor and other agents). Whenever one file is updated, update the other to keep Cursor and Claude in sync.
 
 ## Project overview
 
@@ -21,8 +21,8 @@ Neomyth is a multi-module monorepo for AI applications. The architecture separat
 
 ```text
 neomyth/
-├── AGENTS.md                   # this file — mirrors CLAUDE.md
-├── CLAUDE.md                   # Claude Code / Cowork guide — mirrors this file
+├── AGENTS.md                   # Cursor / general agent guide — mirrors this file
+├── CLAUDE.md                   # this file — mirrors AGENTS.md
 ├── pyproject.toml              # single source of Python dependencies (API + modules)
 ├── .python-version             # Python 3.12
 ├── .env.example                # runtime env template (URLs, ports)
