@@ -26,3 +26,6 @@ Thumbs.db
 # Worker env files (keep .env.example)
 deploy/*/.env
 !deploy/*/.env.example
+
+# Uploads
+uploads/

@@ -8,78 +8,30 @@ import {
   Plus,
   X,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   FileText,
   Code2,
   Eye,
   Braces,
+  AlertCircle,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ToolHeader } from "@/components/ToolHeader";
-import { cn } from "@/lib/utils";
+import {
+  uploadDocument,
+  startJob,
+  getJob,
+  getHistory,
+  pageImageUrl,
+  type HistoryItem,
+  type JobResult,
+  type SectionResult,
+} from "@/lib/parse-api";
 
 type View = "upload" | "processing" | "results";
 type Tab = "markdown" | "json";
-
-interface Section {
-  id: string;
-  label: string;
-  region: string;
-  rect: { top: number; left: number; width: number; height: number };
-  md: string;
-  json: string;
-}
-
-const SECTIONS: Section[] = [
-  {
-    id: "header",
-    label: "Header",
-    region: "A1",
-    rect: { top: 4, left: 6, width: 88, height: 11 },
-    md: "# Acme Corporation\n123 Market Street, San Francisco, CA 94103\n\n## INVOICE",
-    json: '  "vendor": {\n    "name": "Acme Corporation",\n    "address": "123 Market Street, San Francisco, CA 94103"\n  },',
-  },
-  {
-    id: "billto",
-    label: "Bill To",
-    region: "B1",
-    rect: { top: 20, left: 6, width: 42, height: 14 },
-    md: "**Bill To**\nGlobex Inc.\nAttn: Jane Smith\n500 Industrial Way\nAustin, TX 78701",
-    json: '  "customer": {\n    "name": "Globex Inc.",\n    "contact": "Jane Smith",\n    "address": "500 Industrial Way, Austin, TX 78701"\n  },',
-  },
-  {
-    id: "meta",
-    label: "Invoice details",
-    region: "B2",
-    rect: { top: 20, left: 54, width: 40, height: 14 },
-    md: "| Field | Value |\n|-------|-------|\n| Invoice # | INV-2026-0042 |\n| Date | Jun 12, 2026 |\n| Due Date | Jul 12, 2026 |",
-    json: '  "invoice": {\n    "number": "INV-2026-0042",\n    "date": "2026-06-12",\n    "due_date": "2026-07-12"\n  },',
-  },
-  {
-    id: "items",
-    label: "Line items",
-    region: "C1",
-    rect: { top: 38, left: 6, width: 88, height: 30 },
-    md: "| Description | Qty | Unit Price | Amount |\n|-------------|-----|-----------|--------|\n| Design retainer | 1 | $4,500.00 | $4,500.00 |\n| Frontend dev (hrs) | 32 | $120.00 | $3,840.00 |\n| Cloud hosting | 3 | $90.00 | $270.00 |",
-    json: '  "line_items": [\n    { "description": "Design retainer", "qty": 1, "unit_price": 4500.00, "amount": 4500.00 },\n    { "description": "Frontend dev (hrs)", "qty": 32, "unit_price": 120.00, "amount": 3840.00 },\n    { "description": "Cloud hosting", "qty": 3, "unit_price": 90.00, "amount": 270.00 }\n  ],',
-  },
-  {
-    id: "totals",
-    label: "Totals",
-    region: "D1",
-    rect: { top: 70, left: 54, width: 40, height: 13 },
-    md: "**Subtotal:** $8,610.00\n**Tax (8.5%):** $731.85\n**Total Due: $9,341.85**",
-    json: '  "totals": {\n    "subtotal": 8610.00,\n    "tax": 731.85,\n    "total_due": 9341.85\n  },',
-  },
-  {
-    id: "notes",
-    label: "Notes",
-    region: "E1",
-    rect: { top: 86, left: 6, width: 88, height: 9 },
-    md: "> Payment due within 30 days. Make checks payable to Acme Corporation.\n> Thank you for your business!",
-    json: '  "notes": "Payment due within 30 days. Thank you for your business!"',
-  },
-];
 
 const STEP_LABELS = [
   "Uploading document…",
@@ -89,12 +41,13 @@ const STEP_LABELS = [
   "Finalizing output…",
 ];
 
-const HISTORY_ITEMS = [
-  { file: "invoice_acme_2026.pdf", type: "Invoice", date: "Jun 12, 2026", sections: 6, color: "#3fb950" },
-  { file: "globex_msa_contract.pdf", type: "Contract", date: "Jun 05, 2026", sections: 11, color: "#a371f7" },
-  { file: "starbucks_receipt.pdf", type: "Receipt", date: "May 28, 2026", sections: 4, color: "#f0883e" },
-  { file: "q2_earnings_report.pdf", type: "Report", date: "May 15, 2026", sections: 18, color: "#58a6ff" },
-];
+const DOC_TYPE_COLORS: Record<string, string> = {
+  INVOICE: "#3fb950",
+  CONTRACT: "#a371f7",
+  RECEIPT: "#f0883e",
+  REPORT: "#58a6ff",
+  OTHER: "#8b949e",
+};
 
 const DEFAULT_SCHEMA = `{
   "vendor": { "name": "string", "address": "string" },
@@ -106,6 +59,8 @@ const DEFAULT_SCHEMA = `{
   "totals": { "subtotal": "number", "tax": "number", "total_due": "number" },
   "notes": "string"
 }`;
+
+const ACC = "#58a6ff";
 
 function hexA(hex: string, a: number) {
   let h = hex.replace("#", "");
@@ -120,7 +75,7 @@ export default function ParseApp() {
   const [view, setView] = useState<View>("upload");
   const [activeTab, setActiveTab] = useState<Tab>("markdown");
   const [hovered, setHovered] = useState<string | null>(null);
-  const [fileName, setFileName] = useState("invoice_acme_2026.pdf");
+  const [fileName, setFileName] = useState("");
   const [step, setStep] = useState(0);
   const [progress, setProgress] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -128,6 +83,11 @@ export default function ParseApp() {
   const [schemaOpen, setSchemaOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [schema, setSchema] = useState(DEFAULT_SCHEMA);
+  const [error, setError] = useState("");
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [apiConnected, setApiConnected] = useState(false);
+  const [result, setResult] = useState<JobResult | null>(null);
+  const [pageNumber, setPageNumber] = useState(1);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const timersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
@@ -139,48 +99,123 @@ export default function ParseApp() {
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 
-  const startProcessing = useCallback(
-    (name: string) => {
+  const loadHistory = useCallback(async () => {
+    try {
+      const items = await getHistory();
+      setHistory(items);
+      setApiConnected(true);
+    } catch {
+      setApiConnected(false);
+    }
+  }, []);
+
+  useEffect(() => { loadHistory(); }, [loadHistory]);
+
+  // Visual step animation; advances to the last step and holds until the real
+  // job result arrives (the poll drives the transition to the results view).
+  const runProcessingAnimation = useCallback(() => {
+    const tick = (i: number) => {
+      setStep(i);
+      setProgress(Math.min(95, Math.round(((i + 1) / 5) * 100)));
+      if (i < 4) {
+        timersRef.current.push(setTimeout(() => tick(i + 1), 620));
+      }
+    };
+    timersRef.current.push(setTimeout(() => tick(0), 220));
+  }, []);
+
+  const pollJob = useCallback(async (jobId: string): Promise<JobResult> => {
+    for (let i = 0; i < 90; i++) {
+      const r = await getJob(jobId);
+      if (r.status === "COMPLETED" || r.status === "FAILED") return r;
+      await new Promise((res) => setTimeout(res, 800));
+    }
+    return getJob(jobId);
+  }, []);
+
+  const handleFile = useCallback(
+    async (file: File) => {
       clearTimers();
-      setView("processing");
+      setError("");
+      setResult(null);
+      setHovered(null);
+      setPageNumber(1);
+      setHistoryOpen(false);
+      setFileName(file.name);
       setStep(0);
       setProgress(6);
-      setHistoryOpen(false);
-      setHovered(null);
-      setFileName(name);
+      setView("processing");
+      runProcessingAnimation();
 
-      const tick = (i: number) => {
-        setStep(i);
-        setProgress(Math.round(((i + 1) / 5) * 100));
-        if (i < 4) {
-          timersRef.current.push(setTimeout(() => tick(i + 1), 620));
-        } else {
-          timersRef.current.push(setTimeout(() => setView("results"), 560));
+      try {
+        const doc = await uploadDocument(file);
+        const job = await startJob(doc.id, schema.trim() ? schema : undefined);
+        const final = await pollJob(job.job_id);
+        clearTimers();
+        if (final.status === "FAILED") {
+          setError(final.error_msg || "Parsing failed.");
         }
-      };
-      timersRef.current.push(setTimeout(() => tick(0), 220));
+        setResult(final);
+        setProgress(100);
+        setView("results");
+        await loadHistory();
+      } catch {
+        clearTimers();
+        setError(
+          "Could not reach the parser API. Ensure the API server (port 5000) and the vLLM worker are running.",
+        );
+        setView("upload");
+      }
     },
-    [clearTimers],
+    [clearTimers, runProcessingAnimation, pollJob, schema, loadHistory],
+  );
+
+  const openHistoryJob = useCallback(
+    async (item: HistoryItem) => {
+      setHistoryOpen(false);
+      setError("");
+      setHovered(null);
+      setPageNumber(1);
+      setFileName(item.filename);
+      try {
+        const r = await getJob(item.job_id);
+        setResult(r);
+        setView("results");
+      } catch {
+        setError("Could not load that document.");
+      }
+    },
+    [],
   );
 
   const reset = useCallback(() => {
     clearTimers();
     setView("upload");
     setHovered(null);
+    setError("");
+    setResult(null);
   }, [clearTimers]);
 
+  const hoverSection = useCallback((s: SectionResult | null) => {
+    setHovered(s?.id ?? null);
+    if (s) setPageNumber(s.page_number);
+  }, []);
+
   const copyOutput = useCallback(() => {
+    if (!result) return;
     const txt =
       activeTab === "markdown"
-        ? SECTIONS.map((s) => s.md).join("\n\n")
-        : "{\n" + SECTIONS.map((s) => s.json).join("\n") + "\n}";
+        ? result.sections.map((s) => s.markdown).join("\n\n")
+        : JSON.stringify(result.json_output ?? {}, null, 2);
     navigator.clipboard?.writeText(txt).catch(() => {});
     setCopied(true);
     const t = setTimeout(() => setCopied(false), 1200);
     timersRef.current.push(t);
-  }, [activeTab]);
+  }, [activeTab, result]);
 
-  const ACC = "#58a6ff";
+  const sections = result?.sections ?? [];
+  const pageCount = Math.max(1, ...sections.map((s) => s.page_number), 1);
+  const pageSections = sections.filter((s) => s.page_number === pageNumber);
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground" style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}>
@@ -189,7 +224,8 @@ export default function ParseApp() {
         title="Neo-Parse"
         subtitle="PDF → Markdown · Structured JSON"
         icon={FileText}
-        statusLabel="parser-v2 · ready"
+        statusLabel={apiConnected ? "api · connected" : "api · offline"}
+        statusActive={apiConnected}
       >
         {view === "results" && (
           <Button variant="outline" size="sm" onClick={reset} className="gap-[7px]">
@@ -215,6 +251,13 @@ export default function ParseApp() {
                 </p>
               </div>
 
+              {error && (
+                <div className="flex items-center gap-2 rounded-[10px] border px-4 py-3 text-[12.5px]" style={{ background: "#1c1408", borderColor: "#3d2e04", color: "#d29922" }}>
+                  <AlertCircle className="h-[15px] w-[15px] flex-none" />
+                  {error}
+                </div>
+              )}
+
               {/* Dropzone */}
               <div
                 onClick={() => fileRef.current?.click()}
@@ -224,7 +267,7 @@ export default function ParseApp() {
                   e.preventDefault();
                   setDragging(false);
                   const f = e.dataTransfer.files?.[0];
-                  startProcessing(f?.name ?? "document.pdf");
+                  if (f) handleFile(f);
                 }}
                 className="flex min-h-[200px] cursor-pointer flex-col items-center justify-center gap-2 rounded-[14px] text-center transition-all"
                 style={{
@@ -249,7 +292,7 @@ export default function ParseApp() {
                   className="hidden"
                   onChange={(e) => {
                     const f = e.target.files?.[0];
-                    if (f) startProcessing(f.name);
+                    if (f) handleFile(f);
                   }}
                 />
               </div>
@@ -293,7 +336,7 @@ export default function ParseApp() {
               {/* Action buttons */}
               <div className="flex gap-3">
                 <button
-                  onClick={() => startProcessing(fileName)}
+                  onClick={() => fileRef.current?.click()}
                   className="flex flex-1 cursor-pointer items-center justify-center gap-[9px] rounded-[10px] border-none text-[14.5px] font-semibold text-white"
                   style={{
                     height: 46,
@@ -303,7 +346,7 @@ export default function ParseApp() {
                   }}
                 >
                   <Play className="h-[17px] w-[17px]" fill="white" />
-                  Parse document
+                  Select & parse document
                 </button>
                 <button
                   onClick={() => setHistoryOpen(true)}
@@ -339,7 +382,6 @@ export default function ParseApp() {
         {view === "processing" && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="flex w-[420px] max-w-[90%] flex-col items-center gap-[22px]">
-              {/* Animated document */}
               <div className="relative h-[120px] w-[96px] overflow-hidden rounded-lg bg-white" style={{ boxShadow: "0 8px 40px rgba(31,111,235,.25)" }}>
                 {[14, 28, 42, 62, 76, 96].map((t, i) => (
                   <div
@@ -369,7 +411,6 @@ export default function ParseApp() {
                 </div>
               </div>
 
-              {/* Progress bar */}
               <div className="h-[6px] w-full overflow-hidden rounded border border-border" style={{ background: "#161b22" }}>
                 <div
                   className="h-full rounded transition-[width] duration-400"
@@ -380,7 +421,6 @@ export default function ParseApp() {
                 />
               </div>
 
-              {/* Step dots */}
               <div className="flex gap-2">
                 {STEP_LABELS.map((_, i) => (
                   <span
@@ -396,85 +436,123 @@ export default function ParseApp() {
 
         {/* RESULTS VIEW */}
         {view === "results" && (
-          <div className="absolute inset-0 grid min-h-0 grid-cols-2">
-            {/* LEFT: extracted output */}
-            <section className="flex min-h-0 flex-col border-r border-border">
-              {/* Tabs */}
-              <div className="flex flex-none items-center justify-between border-b border-border px-[14px]" style={{ height: 46 }}>
-                <div className="flex h-full items-end gap-[2px]">
-                  {(["markdown", "json"] as const).map((tab) => (
-                    <button
-                      key={tab}
-                      onClick={() => setActiveTab(tab)}
-                      className="flex h-full items-center gap-[7px] border-none bg-transparent px-[13px] text-[13px] font-semibold capitalize"
-                      style={{
-                        fontFamily: "inherit",
-                        borderBottom: activeTab === tab ? `2px solid ${ACC}` : "2px solid transparent",
-                        color: activeTab === tab ? "#e6edf3" : "#6e7681",
-                        marginBottom: -1,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {tab === "markdown" ? <FileText className="h-[14px] w-[14px]" /> : <Braces className="h-[14px] w-[14px]" />}
-                      {tab === "markdown" ? "Markdown" : "JSON"}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  onClick={copyOutput}
-                  className="flex items-center gap-[6px] rounded-[7px] border border-border px-[11px] text-[12px] font-medium"
-                  style={{ height: 30, background: "#161b22", color: "#9fb6cf", fontFamily: "inherit", cursor: "pointer" }}
-                >
-                  {copied ? <Check className="h-[13px] w-[13px]" /> : <Copy className="h-[13px] w-[13px]" />}
-                  {copied ? "Copied!" : "Copy"}
-                </button>
+          <div className="absolute inset-0 flex min-h-0 flex-col">
+            {error && (
+              <div className="flex items-center gap-2 border-b border-border px-4 py-2 text-[12.5px]" style={{ background: "#1c1408", borderColor: "#3d2e04", color: "#d29922" }}>
+                <AlertCircle className="h-[14px] w-[14px] flex-none" />
+                {error}
               </div>
-
-              {/* Content */}
-              <div className="flex-1 overflow-y-auto p-[14px] pb-7" style={{ minHeight: 0 }}>
-                {activeTab === "markdown" ? (
-                  <div className="flex flex-col gap-1">
-                    {SECTIONS.map((s) => (
-                      <SectionBlock key={s.id} section={s} field="md" hovered={hovered} onHover={setHovered} accent={ACC} />
+            )}
+            <div className="grid min-h-0 flex-1 grid-cols-2">
+              {/* LEFT: extracted output */}
+              <section className="flex min-h-0 flex-col border-r border-border">
+                {/* Tabs */}
+                <div className="flex flex-none items-center justify-between border-b border-border px-[14px]" style={{ height: 46 }}>
+                  <div className="flex h-full items-end gap-[2px]">
+                    {(["markdown", "json"] as const).map((tab) => (
+                      <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        className="flex h-full items-center gap-[7px] border-none bg-transparent px-[13px] text-[13px] font-semibold"
+                        style={{
+                          fontFamily: "inherit",
+                          borderBottom: activeTab === tab ? `2px solid ${ACC}` : "2px solid transparent",
+                          color: activeTab === tab ? "#e6edf3" : "#6e7681",
+                          marginBottom: -1,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {tab === "markdown" ? <FileText className="h-[14px] w-[14px]" /> : <Braces className="h-[14px] w-[14px]" />}
+                        {tab === "markdown" ? "Markdown" : "JSON"}
+                      </button>
                     ))}
                   </div>
-                ) : (
-                  <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12.5px", lineHeight: 1.7 }}>
-                    <div className="px-[14px] text-muted-foreground">{"{"}</div>
-                    {SECTIONS.map((s) => (
-                      <SectionBlock key={s.id} section={s} field="json" hovered={hovered} onHover={setHovered} accent={ACC} />
-                    ))}
-                    <div className="px-[14px] text-muted-foreground">{"}"}</div>
+                  <button
+                    onClick={copyOutput}
+                    className="flex items-center gap-[6px] rounded-[7px] border border-border px-[11px] text-[12px] font-medium"
+                    style={{ height: 30, background: "#161b22", color: "#9fb6cf", fontFamily: "inherit", cursor: "pointer" }}
+                  >
+                    {copied ? <Check className="h-[13px] w-[13px]" /> : <Copy className="h-[13px] w-[13px]" />}
+                    {copied ? "Copied!" : "Copy"}
+                  </button>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 overflow-y-auto p-[14px] pb-7" style={{ minHeight: 0 }}>
+                  {sections.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center gap-2 py-16 text-center text-muted-foreground">
+                      <AlertCircle className="h-7 w-7" />
+                      <p className="text-[14px]">No extractable content found in this document.</p>
+                    </div>
+                  ) : activeTab === "markdown" ? (
+                    <div className="flex flex-col gap-1">
+                      {sections.map((s) => (
+                        <SectionBlock key={s.id} section={s} hovered={hovered} onHover={hoverSection} accent={ACC} />
+                      ))}
+                    </div>
+                  ) : (
+                    <pre className="m-0 whitespace-pre-wrap break-words px-[14px] text-[12.5px] leading-[1.7]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#9db8d8" }}>
+                      {JSON.stringify(result?.json_output ?? {}, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              </section>
+
+              {/* RIGHT: document preview */}
+              <section className="flex min-h-0 flex-col" style={{ background: "#010409" }}>
+                <div className="flex flex-none items-center justify-between border-b border-border px-[14px]" style={{ height: 46, background: "#0d1117" }}>
+                  <div className="flex min-w-0 items-center gap-[9px]">
+                    <FileText className="h-[15px] w-[15px] flex-none" style={{ color: "#f0883e" }} />
+                    <span className="truncate text-[13px] font-medium" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{fileName}</span>
                   </div>
-                )}
-              </div>
-            </section>
+                  <div className="flex flex-none items-center gap-[10px]">
+                    {pageCount > 1 && (
+                      <div className="flex items-center gap-[6px]">
+                        <button
+                          onClick={() => setPageNumber((p) => Math.max(1, p - 1))}
+                          disabled={pageNumber <= 1}
+                          className="flex h-[22px] w-[22px] items-center justify-center rounded border border-border text-muted-foreground disabled:opacity-40"
+                          style={{ background: "#161b22", cursor: pageNumber <= 1 ? "default" : "pointer" }}
+                        >
+                          <ChevronLeft className="h-[13px] w-[13px]" />
+                        </button>
+                        <span className="text-[11.5px] text-muted-foreground">Page {pageNumber} / {pageCount}</span>
+                        <button
+                          onClick={() => setPageNumber((p) => Math.min(pageCount, p + 1))}
+                          disabled={pageNumber >= pageCount}
+                          className="flex h-[22px] w-[22px] items-center justify-center rounded border border-border text-muted-foreground disabled:opacity-40"
+                          style={{ background: "#161b22", cursor: pageNumber >= pageCount ? "default" : "pointer" }}
+                        >
+                          <ChevronRight className="h-[13px] w-[13px]" />
+                        </button>
+                      </div>
+                    )}
+                    {pageCount <= 1 && (
+                      <span className="text-[11.5px] text-muted-foreground">Page 1 / 1</span>
+                    )}
+                    <span className="flex items-center gap-[5px] rounded-full border px-[9px] py-[3px] text-[11px]" style={{ color: "#9fc4f0", background: "#0d2a4d", borderColor: "#1f4b80" }}>
+                      <span className="h-[6px] w-[6px] rounded-full" style={{ background: ACC }} />
+                      source grounding
+                    </span>
+                  </div>
+                </div>
 
-            {/* RIGHT: document preview */}
-            <section className="flex min-h-0 flex-col" style={{ background: "#010409" }}>
-              <div className="flex flex-none items-center justify-between border-b border-border px-[14px]" style={{ height: 46, background: "#0d1117" }}>
-                <div className="flex min-w-0 items-center gap-[9px]">
-                  <FileText className="h-[15px] w-[15px] flex-none" style={{ color: "#f0883e" }} />
-                  <span className="truncate text-[13px] font-medium" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{fileName}</span>
+                <div className="flex flex-1 justify-center overflow-y-auto p-[26px]" style={{ minHeight: 0 }}>
+                  <div className="relative w-full max-w-[560px] self-start overflow-hidden rounded-[3px] bg-white" style={{ boxShadow: "0 10px 50px rgba(0,0,0,.55)" }}>
+                    {result && (
+                      <img
+                        src={pageImageUrl(result.document_id, pageNumber)}
+                        alt={`Page ${pageNumber}`}
+                        className="block w-full"
+                      />
+                    )}
+                    {pageSections.map((s) => (
+                      <OverlayRegion key={s.id} section={s} hovered={hovered} onHover={hoverSection} accent={ACC} />
+                    ))}
+                  </div>
                 </div>
-                <div className="flex flex-none items-center gap-[10px]">
-                  <span className="text-[11.5px] text-muted-foreground">Page 1 / 1</span>
-                  <span className="flex items-center gap-[5px] rounded-full border px-[9px] py-[3px] text-[11px]" style={{ color: "#9fc4f0", background: "#0d2a4d", borderColor: "#1f4b80" }}>
-                    <span className="h-[6px] w-[6px] rounded-full" style={{ background: ACC }} />
-                    source grounding
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex flex-1 justify-center overflow-y-auto p-[26px]" style={{ minHeight: 0 }}>
-                <div className="relative w-full max-w-[560px] self-start overflow-hidden rounded-[3px] bg-white" style={{ aspectRatio: "1 / 1.414", boxShadow: "0 10px 50px rgba(0,0,0,.55)" }}>
-                  <InvoicePreview />
-                  {SECTIONS.map((s) => (
-                    <OverlayRegion key={s.id} section={s} hovered={hovered} onHover={setHovered} accent={ACC} />
-                  ))}
-                </div>
-              </div>
-            </section>
+              </section>
+            </div>
           </div>
         )}
       </div>
@@ -498,7 +576,7 @@ export default function ParseApp() {
             <History className="h-4 w-4" style={{ color: ACC }} />
             <span className="text-[14px] font-semibold">Parsing history</span>
             <span className="rounded-full border border-border px-2 py-[2px] text-[11px] text-muted-foreground" style={{ background: "#161b22" }}>
-              {HISTORY_ITEMS.length} documents
+              {history.length} documents
             </span>
           </div>
           <button
@@ -510,28 +588,37 @@ export default function ParseApp() {
           </button>
         </div>
         <div className="flex gap-3 overflow-x-auto px-[18px] py-4">
-          {HISTORY_ITEMS.map((h) => (
-            <div
-              key={h.file}
-              onClick={() => startProcessing(h.file)}
-              className="flex-none cursor-pointer rounded-[11px] border border-border p-[14px] transition-colors hover:border-primary/40"
-              style={{ width: 232, background: "#10151c" }}
-            >
-              <div className="mb-[11px] flex items-center gap-[9px]">
-                <div className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-lg" style={{ background: hexA(h.color, 0.13), color: h.color }}>
-                  <FileText className="h-[15px] w-[15px]" />
-                </div>
-                <span className="rounded-full px-2 py-[2px] text-[10px] font-semibold" style={{ color: h.color, background: hexA(h.color, 0.12) }}>
-                  {h.type}
-                </span>
-              </div>
-              <div className="truncate text-[12.5px] font-semibold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{h.file}</div>
-              <div className="mt-[9px] flex items-center justify-between text-[11px] text-muted-foreground">
-                <span>{h.date}</span>
-                <span>{h.sections} sections</span>
-              </div>
+          {history.length === 0 ? (
+            <div className="flex w-full items-center justify-center py-8 text-[13px] text-muted-foreground">
+              No documents parsed yet. Upload a PDF to get started.
             </div>
-          ))}
+          ) : (
+            history.map((h) => {
+              const color = DOC_TYPE_COLORS[h.doc_type] ?? DOC_TYPE_COLORS.OTHER;
+              return (
+                <div
+                  key={h.job_id}
+                  onClick={() => openHistoryJob(h)}
+                  className="flex-none cursor-pointer rounded-[11px] border border-border p-[14px] transition-colors hover:border-primary/40"
+                  style={{ width: 232, background: "#10151c" }}
+                >
+                  <div className="mb-[11px] flex items-center gap-[9px]">
+                    <div className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-lg" style={{ background: hexA(color, 0.13), color }}>
+                      <FileText className="h-[15px] w-[15px]" />
+                    </div>
+                    <span className="rounded-full px-2 py-[2px] text-[10px] font-semibold" style={{ color, background: hexA(color, 0.12) }}>
+                      {h.doc_type}
+                    </span>
+                  </div>
+                  <div className="truncate text-[12.5px] font-semibold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{h.filename}</div>
+                  <div className="mt-[9px] flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span>{new Date(h.created_at).toLocaleDateString()}</span>
+                    <span>{h.section_count} sections</span>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 
@@ -545,7 +632,7 @@ export default function ParseApp() {
           <History className="h-[14px] w-[14px]" />
           <span className="text-[12.5px] font-medium">History</span>
           <span className="rounded-[10px] border border-border px-[7px] py-[1px] text-[10px] text-muted-foreground" style={{ background: "#0d1117" }}>
-            {HISTORY_ITEMS.length}
+            {history.length}
           </span>
         </button>
       )}
@@ -562,21 +649,19 @@ export default function ParseApp() {
 
 function SectionBlock({
   section,
-  field,
   hovered,
   onHover,
   accent,
 }: {
-  section: Section;
-  field: "md" | "json";
+  section: SectionResult;
   hovered: string | null;
-  onHover: (id: string | null) => void;
+  onHover: (s: SectionResult | null) => void;
   accent: string;
 }) {
   const active = hovered === section.id;
   return (
     <div
-      onMouseEnter={() => onHover(section.id)}
+      onMouseEnter={() => onHover(section)}
       onMouseLeave={() => onHover(null)}
       className="cursor-pointer rounded-[7px] px-3 py-[9px] transition-all"
       style={{
@@ -591,8 +676,8 @@ function SectionBlock({
           § {section.region}
         </span>
       </div>
-      <pre className="m-0 whitespace-pre-wrap break-words text-[12.5px] leading-[1.7]" style={{ fontFamily: "'JetBrains Mono', monospace", color: field === "md" ? "#c9d6e3" : "#9db8d8" }}>
-        {section[field]}
+      <pre className="m-0 whitespace-pre-wrap break-words text-[12.5px] leading-[1.7]" style={{ fontFamily: "'JetBrains Mono', monospace", color: "#c9d6e3" }}>
+        {section.markdown}
       </pre>
     </div>
   );
@@ -604,15 +689,15 @@ function OverlayRegion({
   onHover,
   accent,
 }: {
-  section: Section;
+  section: SectionResult;
   hovered: string | null;
-  onHover: (id: string | null) => void;
+  onHover: (s: SectionResult | null) => void;
   accent: string;
 }) {
   const active = hovered === section.id;
   return (
     <div
-      onMouseEnter={() => onHover(section.id)}
+      onMouseEnter={() => onHover(section)}
       onMouseLeave={() => onHover(null)}
       className="absolute cursor-pointer rounded transition-all"
       style={{
@@ -635,75 +720,6 @@ function OverlayRegion({
       >
         {section.label}
       </span>
-    </div>
-  );
-}
-
-function InvoicePreview() {
-  return (
-    <div className="pointer-events-none absolute inset-0" style={{ color: "#1a1a1a" }}>
-      {/* Header */}
-      <div className="absolute flex justify-between" style={{ top: "4%", left: "6%", width: "88%", height: "11%" }}>
-        <div>
-          <div className="text-[18px] font-bold" style={{ color: "#111" }}>Acme Corporation</div>
-          <div className="mt-1 text-[9.5px] leading-[1.4]" style={{ color: "#777" }}>123 Market Street<br />San Francisco, CA 94103</div>
-        </div>
-        <div className="text-right">
-          <div className="text-[26px] font-light tracking-[3px]" style={{ color: "#9aa0a6" }}>INVOICE</div>
-        </div>
-      </div>
-      {/* Bill To */}
-      <div className="absolute" style={{ top: "20%", left: "6%", width: "42%" }}>
-        <div className="text-[8.5px] font-bold uppercase tracking-[1px]" style={{ color: "#9aa0a6" }}>BILL TO</div>
-        <div className="mt-[6px] text-[12px] font-bold" style={{ color: "#222" }}>Globex Inc.</div>
-        <div className="mt-[3px] text-[9.5px] leading-[1.5]" style={{ color: "#555" }}>Attn: Jane Smith<br />500 Industrial Way<br />Austin, TX 78701</div>
-      </div>
-      {/* Meta */}
-      <div className="absolute" style={{ top: "20%", left: "54%", width: "40%" }}>
-        {[
-          ["Invoice #", "INV-2026-0042"],
-          ["Date", "Jun 12, 2026"],
-          ["Due Date", "Jul 12, 2026"],
-        ].map(([label, val], i) => (
-          <div key={label} className="flex justify-between border-b py-[3px] text-[9.5px]" style={{ borderColor: i < 2 ? "#eee" : "transparent" }}>
-            <span style={{ color: "#888" }}>{label}</span>
-            <span className="font-semibold" style={{ color: "#222" }}>{val}</span>
-          </div>
-        ))}
-      </div>
-      {/* Items table */}
-      <div className="absolute" style={{ top: "38%", left: "6%", width: "88%" }}>
-        <div className="flex rounded-[3px] px-2 py-[6px] text-[8.5px] font-bold uppercase tracking-wide text-white" style={{ background: "#1a1a1a" }}>
-          <span className="flex-1">Description</span>
-          <span className="w-[34px] text-right">Qty</span>
-          <span className="w-[70px] text-right">Unit</span>
-          <span className="w-[70px] text-right">Amount</span>
-        </div>
-        {[
-          ["Design retainer", "1", "$4,500.00", "$4,500.00"],
-          ["Frontend dev (hrs)", "32", "$120.00", "$3,840.00"],
-          ["Cloud hosting", "3", "$90.00", "$270.00"],
-        ].map(([desc, qty, unit, amt]) => (
-          <div key={desc} className="flex border-b px-2 py-2 text-[9.5px]" style={{ borderColor: "#eee", color: "#333" }}>
-            <span className="flex-1">{desc}</span>
-            <span className="w-[34px] text-right">{qty}</span>
-            <span className="w-[70px] text-right">{unit}</span>
-            <span className="w-[70px] text-right">{amt}</span>
-          </div>
-        ))}
-      </div>
-      {/* Totals */}
-      <div className="absolute" style={{ top: "70%", left: "54%", width: "40%" }}>
-        <div className="flex justify-between py-[3px] text-[9.5px]" style={{ color: "#555" }}><span>Subtotal</span><span>$8,610.00</span></div>
-        <div className="flex justify-between border-b py-[3px] text-[9.5px]" style={{ color: "#555", borderColor: "#eee" }}><span>Tax (8.5%)</span><span>$731.85</span></div>
-        <div className="flex justify-between py-[7px] text-[13px] font-bold" style={{ color: "#111" }}><span>Total Due</span><span>$9,341.85</span></div>
-      </div>
-      {/* Notes */}
-      <div className="absolute border-t pt-2" style={{ top: "86%", left: "6%", width: "88%", borderColor: "#eee" }}>
-        <div className="text-[9px] italic leading-[1.5]" style={{ color: "#888" }}>
-          Payment due within 30 days. Make checks payable to Acme Corporation.<br />Thank you for your business!
-        </div>
-      </div>
     </div>
   );
 }

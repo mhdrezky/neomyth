@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import get_settings
-from api.routers import voice
+from api.routers import parse, voice
 
 
 @asynccontextmanager
@@ -28,6 +28,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(voice.router)
+    app.include_router(parse.router)
 
     @app.get("/health")
     async def health() -> dict[str, str]:
