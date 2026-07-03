@@ -160,7 +160,10 @@ export default function VoiceApp() {
       const raw = atob(base64Audio);
       const bytes = new Uint8Array(raw.length);
       for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-      const int16 = new Int16Array(bytes.buffer);
+      // Guard against a stray odd-length chunk so Int16Array never throws.
+      const sampleCount = Math.floor(bytes.length / 2);
+      if (sampleCount === 0) return;
+      const int16 = new Int16Array(bytes.buffer, 0, sampleCount);
       const float32 = new Float32Array(int16.length);
       for (let i = 0; i < int16.length; i++) {
         float32[i] = int16[i] / 32768;
@@ -210,7 +213,14 @@ export default function VoiceApp() {
       }
 
       if (msg.type === "state") {
-        setPhaseState((msg.data.phase as Phase) || "idle");
+        const nextPhase = (msg.data.phase as Phase) || "idle";
+        // "listening" marks the end of a turn: finalize the streamed reply
+        // even when it produced no TTS audio.
+        if (nextPhase === "listening" && assistantBufferRef.current.trim()) {
+          finalizeAssistantMessage(assistantBufferRef.current.trim());
+          assistantBufferRef.current = "";
+        }
+        setPhaseState(nextPhase);
         return;
       }
 
@@ -227,20 +237,19 @@ export default function VoiceApp() {
       }
 
       if (msg.type === "tts_audio") {
-        if (assistantBufferRef.current.trim()) {
-          finalizeAssistantMessage(assistantBufferRef.current.trim());
-          assistantBufferRef.current = "";
-        }
         if (latencyStartRef.current > 0) {
           const ms = Math.round(performance.now() - latencyStartRef.current);
           setLatency(`${ms} ms`);
           latencyStartRef.current = 0;
         }
-        void playPcmChunk(
+        playPcmChunk(
           msg.data.audio,
           msg.data.sample_rate || SAMPLE_RATE,
           playbackEpochRef.current,
-        );
+        ).catch((err) => {
+          console.error("TTS playback failed", err);
+          setError(`TTS playback failed: ${String(err)}`);
+        });
         return;
       }
 
@@ -328,10 +337,18 @@ export default function VoiceApp() {
     ws.onerror = () => setError("WebSocket connection failed");
     ws.onmessage = handleMessage;
 
-    const mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
     mediaStreamRef.current = mediaStream;
     const audioContext = new AudioContext();
     audioContextRef.current = audioContext;
+    // Autoplay policies can start the context suspended even after a click.
+    await audioContext.resume();
     const source = audioContext.createMediaStreamSource(mediaStream);
     const processor = audioContext.createScriptProcessor(4096, 1, 1);
     processorRef.current = processor;

@@ -17,18 +17,44 @@ interface ChatMessagesProps {
 
 const SCROLL_THRESHOLD = 120;
 
-function distanceFromPageBottom(): number {
+// Tool pages may scroll at page level (per ui-layout-guide) or inside a
+// nested overflow container (fullWidth app shell); detect which applies.
+function getScrollParent(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null;
+  while (node) {
+    const { overflowY } = window.getComputedStyle(node);
+    if (/(auto|scroll|overlay)/.test(overflowY)) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+function distanceFromBottom(container: HTMLElement | null): number {
+  if (container) {
+    return container.scrollHeight - container.scrollTop - container.clientHeight;
+  }
   const doc = document.documentElement;
   return doc.scrollHeight - window.scrollY - doc.clientHeight;
 }
 
-function scrollPageToBottom(behavior: ScrollBehavior = "auto") {
+function scrollTargetToBottom(
+  container: HTMLElement | null,
+  behavior: ScrollBehavior = "auto",
+) {
+  if (container) {
+    container.scrollTo({
+      top: Math.max(0, container.scrollHeight - container.clientHeight),
+      behavior,
+    });
+    return;
+  }
   const top = document.documentElement.scrollHeight - window.innerHeight;
   window.scrollTo({ top: Math.max(0, top), behavior });
 }
 
 export function ChatMessages({ messages, streamingAssistant }: ChatMessagesProps) {
   const chatRef = useRef<HTMLDivElement>(null);
+  const scrollParentRef = useRef<HTMLElement | null>(null);
   const pinnedRef = useRef(true);
   const programmaticScrollRef = useRef(false);
   const [showJumpButton, setShowJumpButton] = useState(false);
@@ -36,7 +62,7 @@ export function ChatMessages({ messages, streamingAssistant }: ChatMessagesProps
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     programmaticScrollRef.current = true;
 
-    const run = () => scrollPageToBottom(behavior);
+    const run = () => scrollTargetToBottom(scrollParentRef.current, behavior);
 
     if (behavior === "auto") {
       requestAnimationFrame(() => {
@@ -56,19 +82,25 @@ export function ChatMessages({ messages, streamingAssistant }: ChatMessagesProps
     setShowJumpButton(false);
   }, []);
 
-  const handlePageScroll = useCallback(() => {
+  const handleScroll = useCallback(() => {
     if (programmaticScrollRef.current) return;
 
-    const pinned = distanceFromPageBottom() < SCROLL_THRESHOLD;
+    const pinned = distanceFromBottom(scrollParentRef.current) < SCROLL_THRESHOLD;
     pinnedRef.current = pinned;
     setShowJumpButton(!pinned);
   }, []);
 
+  // Resolve the scroll parent before the pinning effect below runs.
+  useLayoutEffect(() => {
+    scrollParentRef.current = getScrollParent(chatRef.current);
+  }, []);
+
   useEffect(() => {
-    window.addEventListener("scroll", handlePageScroll, { passive: true });
-    handlePageScroll();
-    return () => window.removeEventListener("scroll", handlePageScroll);
-  }, [handlePageScroll]);
+    const target: HTMLElement | Window = scrollParentRef.current ?? window;
+    target.addEventListener("scroll", handleScroll, { passive: true });
+    handleScroll();
+    return () => target.removeEventListener("scroll", handleScroll);
+  }, [handleScroll]);
 
   useLayoutEffect(() => {
     if (!pinnedRef.current) return;

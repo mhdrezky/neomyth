@@ -134,7 +134,7 @@ class SentenceChunker:
                 if chunk:
                     chunks.extend(_split_long_chunk(chunk))
                 continue
-            if force and len(self._buffer.strip()) >= self._min_chars:
+            if force and self._buffer.strip():
                 chunk = self._buffer.strip()
                 self._buffer = ""
                 chunks.extend(_split_long_chunk(chunk))

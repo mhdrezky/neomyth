@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Literal, TypedDict
 
@@ -160,21 +161,47 @@ async def generate_and_speak_node(
     assistant_text = ""
     chunker = SentenceChunker()
 
-    async for token in runtime.llm.stream_chat(
-        messages,
-        cancel_event=runtime.cancel_event,
-    ):
-        if runtime.is_stale(gen):
-            return {"messages": messages, "phase": Phase.LISTENING.value}
-        assistant_text += token
-        writer({"type": "llm_delta", "text": token})
-        for sentence in chunker.push(token):
+    # Sentences are spoken by a consumer task so TTS synthesis overlaps with
+    # LLM token streaming instead of pausing it per sentence.
+    sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def speak_sentences() -> None:
+        while True:
+            sentence = await sentence_queue.get()
+            if sentence is None:
+                return
+            if runtime.is_stale(gen):
+                continue
             await _emit_tts(runtime, sentence, gen, writer)
 
-    for sentence in chunker.flush():
-        if runtime.is_stale(gen):
-            return {"messages": messages, "phase": Phase.LISTENING.value}
-        await _emit_tts(runtime, sentence, gen, writer)
+    speak_task = asyncio.create_task(speak_sentences())
+
+    try:
+        async for token in runtime.llm.stream_chat(
+            messages,
+            cancel_event=runtime.cancel_event,
+        ):
+            # speak_task.done() mid-stream means TTS failed; stop and re-raise.
+            if runtime.is_stale(gen) or speak_task.done():
+                break
+            assistant_text += token
+            writer({"type": "llm_delta", "text": token})
+            for sentence in chunker.push(token):
+                sentence_queue.put_nowait(sentence)
+
+        for sentence in chunker.flush():
+            sentence_queue.put_nowait(sentence)
+
+        sentence_queue.put_nowait(None)
+        await speak_task
+    except BaseException:
+        speak_task.cancel()
+        with contextlib.suppress(BaseException):
+            await speak_task
+        raise
+
+    if runtime.is_stale(gen):
+        return {"messages": messages, "phase": Phase.LISTENING.value}
 
     if assistant_text.strip():
         messages = _append_assistant(messages, clean_text_for_tts(assistant_text))

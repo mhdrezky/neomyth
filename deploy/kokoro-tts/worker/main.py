@@ -54,15 +54,24 @@ def _split_text(text: str, max_chars: int = KOKORO_MAX_CHARS) -> list[str]:
     return parts
 
 
-def _synthesize_part(text: str, voice: str):
-    import numpy as np
-
-    chunks: list[np.ndarray] = []
-    for _gs, _ps, audio in _pipeline(text, voice=voice):
-        chunks.append(np.asarray(audio, dtype=np.float32))
-    if not chunks:
-        return np.array([], dtype=np.float32)
-    return np.concatenate(chunks)
+def _iter_pcm(text: str, voice: str):
+    """Yield PCM16 bytes per Kokoro segment as soon as each is synthesized."""
+    for part in _split_text(text):
+        try:
+            for _gs, _ps, audio in _pipeline(part, voice=voice):
+                yield _float32_to_pcm16(audio)
+        except Exception as exc:
+            logger.warning("TTS chunk failed (%s), splitting smaller: %s", exc, part[:80])
+            for sub in re.split(r"(?<=[,;])\s+", part):
+                sub = sub.strip()
+                if not sub:
+                    continue
+                for tiny in _split_text(sub, max_chars=max(60, KOKORO_MAX_CHARS // 2)):
+                    try:
+                        for _gs, _ps, audio in _pipeline(tiny, voice=voice):
+                            yield _float32_to_pcm16(audio)
+                    except Exception:
+                        logger.exception("TTS retry failed, skipping: %s", tiny[:80])
 
 
 @app.on_event("startup")
@@ -96,57 +105,16 @@ def health() -> dict[str, str | int | bool]:
     }
 
 
-def _create_audio(text: str, voice: str):
-    import numpy as np
-
-    if _pipeline is None:
-        return np.array([], dtype=np.float32), _sample_rate
-
-    parts = _split_text(text)
-    if not parts:
-        return np.array([], dtype=np.float32), _sample_rate
-
-    arrays: list[np.ndarray] = []
-    for part in parts:
-        try:
-            arrays.append(_synthesize_part(part, voice))
-        except Exception as exc:
-            logger.warning("TTS chunk failed (%s), splitting smaller: %s", exc, part[:80])
-            for sub in re.split(r"(?<=[,;])\s+", part):
-                sub = sub.strip()
-                if not sub:
-                    continue
-                for tiny in _split_text(sub, max_chars=max(60, KOKORO_MAX_CHARS // 2)):
-                    arrays.append(_synthesize_part(tiny, voice))
-
-    if not arrays:
-        return np.array([], dtype=np.float32), _sample_rate
-    return np.concatenate(arrays), _sample_rate
-
-
 @app.post("/synthesize")
 async def synthesize(body: SynthesizeRequest) -> StreamingResponse:
     if _pipeline is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     voice = body.voice or KOKORO_VOICE
-    try:
-        samples, rate = _create_audio(body.text, voice)
-    except Exception as exc:
-        logger.exception("Synthesize failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    pcm = _float32_to_pcm16(samples)
-
-    def stream():
-        chunk_size = 4096
-        for i in range(0, len(pcm), chunk_size):
-            yield pcm[i : i + chunk_size]
-
     return StreamingResponse(
-        stream(),
+        _iter_pcm(body.text, voice),
         media_type="application/octet-stream",
-        headers={"X-Audio-Sample-Rate": str(rate)},
+        headers={"X-Audio-Sample-Rate": str(_sample_rate)},
     )
 
 

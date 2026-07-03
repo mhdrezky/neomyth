@@ -33,11 +33,22 @@ class TTSClient:
             sample_rate = int(
                 response.headers.get("X-Audio-Sample-Rate", DEFAULT_TTS_SAMPLE_RATE)
             )
+            # Network chunk boundaries are arbitrary; carry any odd trailing
+            # byte so every yielded chunk stays aligned to int16 samples.
+            pending = b""
             async for chunk in response.aiter_bytes():
                 if cancel_event and cancel_event.is_set():
                     break
-                if chunk:
-                    yield chunk, sample_rate
+                if not chunk:
+                    continue
+                data = pending + chunk
+                if len(data) % 2:
+                    pending = data[-1:]
+                    data = data[:-1]
+                else:
+                    pending = b""
+                if data:
+                    yield data, sample_rate
 
     async def health(self) -> bool:
         try:

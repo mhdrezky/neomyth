@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY worker/requirements.txt .
 # CPU PyTorch first (smaller image); Kokoro pulls weights from Hugging Face on startup.
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout 120 --retries 5 torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir --timeout 120 --retries 5 -r requirements.txt
 
 COPY worker/ ./worker/
 
