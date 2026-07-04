@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import fitz  # PyMuPDF
+import pymupdf
+
+from modules.shared.constants import PARSE_SCANNED_PAGE_MIN_CHARS
 
 
 @dataclass
@@ -29,11 +31,25 @@ class PdfPage:
     height: float  # points
     blocks: list[TextBlock] = field(default_factory=list)
 
+    @property
+    def char_count(self) -> int:
+        return sum(len(b.text) for b in self.blocks)
+
+    @property
+    def is_scanned(self) -> bool:
+        """True when the page has no usable text layer (image-only scan)."""
+        return self.char_count < PARSE_SCANNED_PAGE_MIN_CHARS
+
+
+def is_pdf(content: bytes) -> bool:
+    """Cheap magic-bytes check; PDFs must start with '%PDF-'."""
+    return content[:5] == b"%PDF-"
+
 
 def extract_pages(path: str) -> list[PdfPage]:
     """Extract paragraph-level text blocks with bounding boxes from every page."""
     pages: list[PdfPage] = []
-    with fitz.open(path) as doc:
+    with pymupdf.open(path) as doc:
         for index, page in enumerate(doc):
             pw = page.rect.width or 1.0
             ph = page.rect.height or 1.0
@@ -61,17 +77,17 @@ def extract_pages(path: str) -> list[PdfPage]:
 
 
 def page_count(path: str) -> int:
-    with fitz.open(path) as doc:
+    with pymupdf.open(path) as doc:
         return doc.page_count
 
 
 def render_page_png(path: str, page_number: int, zoom: float = 2.0) -> bytes:
     """Render a 1-based page to PNG bytes."""
-    with fitz.open(path) as doc:
+    with pymupdf.open(path) as doc:
         if page_number < 1 or page_number > doc.page_count:
             raise ValueError(f"Page {page_number} out of range (1..{doc.page_count})")
         page = doc[page_number - 1]
-        matrix = fitz.Matrix(zoom, zoom)
+        matrix = pymupdf.Matrix(zoom, zoom)
         pixmap = page.get_pixmap(matrix=matrix, alpha=False)
         return pixmap.tobytes("png")
 

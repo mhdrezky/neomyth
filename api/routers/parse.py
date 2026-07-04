@@ -8,8 +8,9 @@ import uuid
 from fastapi import APIRouter, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 
-from modules.parse import repository as repo, service
+from modules.parse import pdf, repository as repo, service
 from modules.shared.db import get_session
+from modules.shared.utils import json_schema as schema_utils
 
 router = APIRouter(prefix="/parse", tags=["parse"])
 
@@ -37,9 +38,13 @@ class UploadResponse(BaseModel):
 async def upload_document(file: UploadFile) -> UploadResponse:
     if not file.filename:
         raise HTTPException(400, "Filename is required")
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(415, "Only PDF files are supported")
     content = await file.read()
     if len(content) > 25 * 1024 * 1024:
         raise HTTPException(413, "File too large (max 25 MB)")
+    if not pdf.is_pdf(content):
+        raise HTTPException(415, "File is not a valid PDF")
 
     async with get_session() as session:
         result = await service.upload_document(
@@ -59,6 +64,15 @@ async def start_job(body: StartJobRequest) -> StartJobResponse:
             schema = json.loads(body.schema_text)
         except json.JSONDecodeError:
             raise HTTPException(400, "schema_text is not valid JSON")
+        if not isinstance(schema, dict):
+            raise HTTPException(400, "schema_text must be a JSON object")
+        # Real JSON Schemas must be valid draft-07; plain example objects
+        # ("shape hints") are passed through to the LLM unvalidated.
+        if schema_utils.is_json_schema(schema):
+            try:
+                schema_utils.check_schema(schema)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
 
     async with get_session() as session:
         try:

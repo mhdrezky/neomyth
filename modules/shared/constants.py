@@ -21,6 +21,14 @@ PARSE_MIN_OUTPUT_TOKENS = 256
 # Rough chars-per-token used to keep prompt + output within the context window.
 CHARS_PER_TOKEN = 3
 
+# Parse routing: a page with fewer extractable characters than this is treated
+# as a scanned image and sent to the vision model instead of PyMuPDF text.
+PARSE_SCANNED_PAGE_MIN_CHARS = 64
+PARSE_VISION_MAX_TOKENS = 1536
+PARSE_VISION_RENDER_ZOOM = 2.0
+# How many times to ask the LLM to fix JSON that fails draft-07 validation.
+PARSE_JSON_REPAIR_ATTEMPTS = 1
+
 TARGET_LATENCY_MS = 1200
 
 HTTP_TIMEOUT_SECONDS = 60.0
