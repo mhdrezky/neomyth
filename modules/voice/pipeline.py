@@ -4,6 +4,7 @@ import asyncio
 import uuid
 from collections.abc import AsyncIterator
 
+from modules.shared.constants import VOICE_LLM_TEMPERATURE
 from modules.shared.types import Phase, PipelineEvent, PipelineEventType
 from modules.shared.utils.http import create_async_client
 from modules.voice.clients.llm import LLMClient
@@ -21,7 +22,7 @@ class VoicePipeline:
         tts_base_url: str,
         tts_voice: str = "af_sarah",
         llm_max_tokens: int = 256,
-        llm_temperature: float = 0.7,
+        llm_temperature: float = VOICE_LLM_TEMPERATURE,
     ) -> None:
         self._http = create_async_client()
         self._runtime = VoiceGraphRuntime(

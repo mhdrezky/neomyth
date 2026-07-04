@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jsonschema import Draft7Validator
+from jsonschema import Draft7Validator, FormatChecker
 from jsonschema.exceptions import SchemaError
 
 _SCHEMA_MARKER_KEYS = {"$schema", "type", "properties", "items", "required", "definitions", "$defs"}
@@ -30,7 +30,9 @@ def check_schema(schema: dict[str, Any]) -> None:
 
 def validate_output(data: Any, schema: dict[str, Any]) -> list[str]:
     """Validate extracted data against a draft-07 schema; return error messages."""
-    validator = Draft7Validator(schema)
+    # FormatChecker makes "format" assertive (draft-07 treats it as annotation
+    # by default) so e.g. {"format": "email"} is actually enforced.
+    validator = Draft7Validator(schema, format_checker=FormatChecker())
     errors = []
     for err in sorted(validator.iter_errors(data), key=lambda e: list(e.absolute_path)):
         path = "/".join(str(p) for p in err.absolute_path) or "(root)"

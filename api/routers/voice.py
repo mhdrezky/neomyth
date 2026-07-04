@@ -44,7 +44,6 @@ def _create_pipeline() -> VoicePipeline:
         tts_base_url=settings.tts_base_url,
         tts_voice=settings.tts_voice,
         llm_max_tokens=settings.vllm_max_tokens,
-        llm_temperature=settings.vllm_temperature,
     )
 
 

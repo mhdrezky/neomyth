@@ -1,5 +1,6 @@
 # Environment
 .env
+/deploy/vllm-llm/.env
 
 # Web (Astro)
 web/node_modules/

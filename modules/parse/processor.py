@@ -21,7 +21,7 @@ from typing import Any
 from api.config import get_settings
 from modules.parse import pdf, prompts, repository as repo
 from modules.shared.clients import TextLLMClient, VisionLLMClient
-from modules.shared.constants import PARSE_VISION_RENDER_ZOOM
+from modules.shared.constants import PARSE_LLM_TEMPERATURE, PARSE_VISION_RENDER_ZOOM
 from modules.shared.db import get_session
 from modules.shared.db.models import ParseJobStatus
 from modules.shared.tasks import (
@@ -51,7 +51,10 @@ async def _label_blocks(client: TextLLMClient, blocks: list[str]) -> list[str]:
         async with sem:
             try:
                 raw = await client.complete(
-                    prompts.LABEL_SYSTEM, text[:600], max_tokens=_LABEL_MAX_TOKENS
+                    prompts.LABEL_SYSTEM,
+                    text[:600],
+                    max_tokens=_LABEL_MAX_TOKENS,
+                    temperature=PARSE_LLM_TEMPERATURE,
                 )
                 return _clean_label(raw)
             except Exception:

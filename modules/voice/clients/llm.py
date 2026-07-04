@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI
 
-from modules.shared.constants import DEFAULT_LLM_MAX_TOKENS, DEFAULT_LLM_TEMPERATURE
+from modules.shared.constants import DEFAULT_LLM_MAX_TOKENS, VOICE_LLM_TEMPERATURE
 
 
 class LLMClient:
@@ -14,7 +14,7 @@ class LLMClient:
         base_url: str,
         model: str,
         max_tokens: int = DEFAULT_LLM_MAX_TOKENS,
-        temperature: float = DEFAULT_LLM_TEMPERATURE,
+        temperature: float = VOICE_LLM_TEMPERATURE,
     ) -> None:
         self._client = AsyncOpenAI(base_url=base_url, api_key="not-needed")
         self._model = model
