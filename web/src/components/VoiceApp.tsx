@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from "react";
-import { Mic, MicOff } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { History, Mic, MicOff, Trash2, X } from "lucide-react";
 
 import { ChatMessages, type ChatMessage } from "@/components/ChatMessages";
 import { ToolControlPanel } from "@/components/ToolControlPanel";
@@ -9,6 +9,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { apiBaseUrl } from "@/config/site";
 import { cn } from "@/lib/utils";
+import {
+  deleteVoiceSession,
+  getVoiceHistory,
+  getVoiceSession,
+  type VoiceHistoryItem,
+} from "@/lib/voice-api";
 
 const SAMPLE_RATE = 16000;
 const VAD_THRESHOLD = 0.015;
@@ -85,6 +91,9 @@ export default function VoiceApp() {
   const [streamingAssistant, setStreamingAssistant] = useState("");
   const [error, setError] = useState("");
   const [sessionActive, setSessionActive] = useState(false);
+  const [history, setHistory] = useState<VoiceHistoryItem[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [viewingTitle, setViewingTitle] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -190,6 +199,54 @@ export default function VoiceApp() {
       { id: crypto.randomUUID(), role: "assistant", content: text },
     ]);
     setStreamingAssistant("");
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      setHistory(await getVoiceHistory());
+    } catch {
+      /* API offline — keep whatever we had */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadHistory();
+  }, [loadHistory]);
+
+  const openHistoryItem = useCallback(async (item: VoiceHistoryItem) => {
+    setHistoryOpen(false);
+    setError("");
+    try {
+      const detail = await getVoiceSession(item.session_id);
+      setMessages(
+        detail.messages.map((m) => ({
+          id: crypto.randomUUID(),
+          role: m.role,
+          content: m.content,
+        })),
+      );
+      setStreamingAssistant("");
+      setViewingTitle(detail.title);
+    } catch (err) {
+      setError(`Could not load conversation: ${String(err)}`);
+    }
+  }, []);
+
+  const removeHistoryItem = useCallback(
+    async (item: VoiceHistoryItem) => {
+      try {
+        await deleteVoiceSession(item.session_id);
+        await loadHistory();
+      } catch (err) {
+        setError(`Could not delete conversation: ${String(err)}`);
+      }
+    },
+    [loadHistory],
+  );
+
+  const closeHistoryView = useCallback(() => {
+    setViewingTitle(null);
+    setMessages([]);
   }, []);
 
   const interruptAI = useCallback(() => {
@@ -320,6 +377,8 @@ export default function VoiceApp() {
     setError("");
     setMessages([]);
     setStreamingAssistant("");
+    setViewingTitle(null);
+    setHistoryOpen(false);
     assistantBufferRef.current = "";
     playbackEpochRef.current = 0;
     setLatency("—");
@@ -370,6 +429,7 @@ export default function VoiceApp() {
     setSessionActive(false);
     setPhaseState("disconnected");
     setWsStatus("off");
+    void loadHistory();
   };
 
   return (
@@ -431,6 +491,24 @@ export default function VoiceApp() {
         </div>
       </ToolControlPanel>
 
+      {viewingTitle && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-muted/40 px-4 py-2 text-sm">
+          <span className="truncate text-muted-foreground">
+            Viewing history: <strong className="text-foreground">{viewingTitle}</strong>
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 gap-1 px-2 text-xs"
+            onClick={closeHistoryView}
+          >
+            <X className="h-3.5 w-3.5" aria-hidden />
+            Close
+          </Button>
+        </div>
+      )}
+
       <ChatMessages messages={messages} streamingAssistant={streamingAssistant} />
 
       {error && (
@@ -438,6 +516,93 @@ export default function VoiceApp() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+        </div>
+      </div>
+
+      {/* History floating tab */}
+      {!historyOpen && (
+        <button
+          type="button"
+          onClick={() => {
+            void loadHistory();
+            setHistoryOpen(true);
+          }}
+          className="fixed bottom-4 right-[18px] z-30 flex h-[38px] items-center gap-2 rounded-full border border-border bg-card px-[14px] text-muted-foreground shadow-lg transition-colors hover:text-foreground"
+        >
+          <History className="h-[14px] w-[14px]" aria-hidden />
+          <span className="text-[12.5px] font-medium">History</span>
+          <span className="rounded-[10px] border border-border bg-background px-[7px] py-[1px] text-[10px]">
+            {history.length}
+          </span>
+        </button>
+      )}
+
+      {/* HISTORY DRAWER */}
+      {historyOpen && (
+        <div
+          className="fixed inset-0 z-[39] bg-black/55 transition-opacity"
+          onClick={() => setHistoryOpen(false)}
+        />
+      )}
+      <div
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background shadow-2xl transition-transform duration-300"
+        style={{
+          transform: historyOpen ? "translateY(0)" : "translateY(110%)",
+          transitionTimingFunction: "cubic-bezier(.4,0,.2,1)",
+        }}
+      >
+        <div className="flex items-center justify-between border-b border-border px-[18px] py-[13px]">
+          <div className="flex items-center gap-[10px]">
+            <History className="h-4 w-4 text-primary" aria-hidden />
+            <span className="text-[14px] font-semibold">Conversation history</span>
+            <span className="rounded-full border border-border bg-muted px-2 py-[2px] text-[11px] text-muted-foreground">
+              {history.length} conversations
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setHistoryOpen(false)}
+            className="flex h-[30px] w-[30px] items-center justify-center rounded-[7px] border border-border bg-muted text-muted-foreground hover:text-foreground"
+          >
+            <X className="h-[15px] w-[15px]" aria-hidden />
+          </button>
+        </div>
+        <div className="flex gap-3 overflow-x-auto px-[18px] py-4">
+          {history.length === 0 ? (
+            <div className="flex w-full items-center justify-center py-8 text-[13px] text-muted-foreground">
+              No conversations yet. Start a voice session to create one.
+            </div>
+          ) : (
+            history.map((h) => (
+              <div
+                key={h.session_id}
+                onClick={() => void openHistoryItem(h)}
+                className="group w-[232px] flex-none cursor-pointer rounded-[11px] border border-border bg-card p-[14px] transition-colors hover:border-primary/40"
+              >
+                <div className="mb-[11px] flex items-center justify-between gap-2">
+                  <div className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-lg bg-primary/15 text-primary">
+                    <Mic className="h-[15px] w-[15px]" aria-hidden />
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Delete conversation"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void removeHistoryItem(h);
+                    }}
+                    className="flex h-[26px] w-[26px] items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-destructive/15 hover:text-destructive group-hover:opacity-100"
+                  >
+                    <Trash2 className="h-[13px] w-[13px]" aria-hidden />
+                  </button>
+                </div>
+                <div className="truncate text-[12.5px] font-semibold">{h.title}</div>
+                <div className="mt-[9px] flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>{new Date(h.created_at).toLocaleDateString()}</span>
+                  <span>{h.message_count} messages</span>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for the Neo-Parse feature.
+"""SQLAlchemy ORM models shared across Neomyth modules (Neo-Parse, Neo-Voice).
 
 Tables use snake_case names; Python attributes stay camel/snake per SQLAlchemy
 convention. Alembic autogenerate reads `Base.metadata` from this module.
@@ -189,4 +189,54 @@ class ParseSection(Base):
         Index("ix_parse_sections_job_id", "job_id"),
         Index("ix_parse_sections_job_page", "job_id", "page_number"),
         Index("ix_parse_sections_label", "label"),
+    )
+
+
+class VoiceSession(Base):
+    """A saved voice conversation (one Start → Stop session)."""
+
+    __tablename__ = "voice_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_activity_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    messages: Mapped[list[VoiceMessage]] = relationship(
+        back_populates="session", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (Index("ix_voice_sessions_last_activity", "last_activity_at"),)
+
+
+class VoiceMessage(Base):
+    """A single chat turn message inside a voice session."""
+
+    __tablename__ = "voice_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("voice_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    session: Mapped[VoiceSession] = relationship(back_populates="messages")
+
+    __table_args__ = (
+        Index("ix_voice_messages_session_order", "session_id", "sort_order"),
     )

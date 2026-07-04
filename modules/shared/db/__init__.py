@@ -29,6 +29,8 @@ from modules.shared.db.models import (
     ParseJobStatus,
     ParseSection,
     Schema,
+    VoiceMessage,
+    VoiceSession,
 )
 
 __all__ = [
@@ -39,6 +41,8 @@ __all__ = [
     "ParseJobStatus",
     "ParseSection",
     "Schema",
+    "VoiceMessage",
+    "VoiceSession",
     "get_engine",
     "get_sessionmaker",
     "get_session",
