@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -111,8 +111,16 @@ async def create_parse_job(
     *,
     document_id: uuid.UUID,
     schema_id: uuid.UUID | None = None,
+    metadata: dict | None = None,
+    webhook_url: str | None = None,
 ) -> ParseJob:
-    job = ParseJob(document_id=document_id, schema_id=schema_id)
+    job = ParseJob(
+        document_id=document_id,
+        schema_id=schema_id,
+        status=ParseJobStatus.QUEUED,
+        job_metadata=metadata,
+        webhook_url=webhook_url,
+    )
     session.add(job)
     await session.flush()
     return job
@@ -146,6 +154,57 @@ async def list_parse_jobs(
     if document_id:
         stmt = stmt.where(ParseJob.document_id == document_id)
     stmt = stmt.limit(limit).offset(offset)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def count_parse_jobs(session: AsyncSession) -> int:
+    result = await session.execute(select(func.count()).select_from(ParseJob))
+    return int(result.scalar_one())
+
+
+async def list_history_rows(
+    session: AsyncSession,
+    *,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[tuple[ParseJob, Document | None, int]]:
+    """History page rows: (job, document, section_count) newest-first,
+    in one query instead of per-job lookups."""
+    section_counts = (
+        select(
+            ParseSection.job_id,
+            func.count(ParseSection.id).label("section_count"),
+        )
+        .group_by(ParseSection.job_id)
+        .subquery()
+    )
+    stmt = (
+        select(
+            ParseJob,
+            Document,
+            func.coalesce(section_counts.c.section_count, 0),
+        )
+        .join(Document, ParseJob.document_id == Document.id, isouter=True)
+        .outerjoin(section_counts, section_counts.c.job_id == ParseJob.id)
+        .order_by(ParseJob.created_at.desc())
+        .limit(limit)
+        .offset(offset)
+    )
+    result = await session.execute(stmt)
+    return [(row[0], row[1], int(row[2])) for row in result.all()]
+
+
+async def list_jobs_by_status(
+    session: AsyncSession,
+    statuses: list[ParseJobStatus],
+) -> list[ParseJob]:
+    """Jobs in the given statuses, FIFO order (creation time, then id)."""
+    stmt = (
+        select(ParseJob)
+        .where(ParseJob.status.in_(statuses))
+        .order_by(ParseJob.created_at, ParseJob.id)
+    )
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

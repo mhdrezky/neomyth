@@ -24,11 +24,13 @@ from modules.shared.clients import TextLLMClient, VisionLLMClient
 from modules.shared.constants import PARSE_LLM_TEMPERATURE, PARSE_VISION_RENDER_ZOOM
 from modules.shared.db import get_session
 from modules.shared.db.models import ParseJobStatus
+from modules.shared.db.models import ParseJob
 from modules.shared.tasks import (
     image_to_markdown,
     markdown_to_json,
     pdf_text_to_markdown,
 )
+from modules.shared.utils.http import post_webhook
 
 _LABEL_CONCURRENCY = 8
 _LABEL_MAX_TOKENS = 12
@@ -61,6 +63,21 @@ async def _label_blocks(client: TextLLMClient, blocks: list[str]) -> list[str]:
                 return "Text"
 
     return await asyncio.gather(*(one(b) for b in blocks))
+
+
+def _webhook_payload(job: ParseJob) -> dict[str, Any]:
+    """Job result forwarded to the caller's webhook, metadata included."""
+    return {
+        "event": f"parse.job.{job.status.value.lower()}",
+        "job_id": str(job.id),
+        "document_id": str(job.document_id),
+        "status": job.status.value,
+        "error_msg": job.error_msg,
+        "json_output": job.json_output,
+        "markdown_output": job.markdown_output,
+        "metadata": job.job_metadata,
+        "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+    }
 
 
 def _group_by_label(sections: list[dict[str, Any]]) -> dict[str, Any]:
@@ -235,6 +252,8 @@ async def process_job(job_id: uuid.UUID, schema: dict | None) -> None:
         if not document_json:
             document_json = _group_by_label(sections)
 
+        webhook_url: str | None = None
+        webhook_payload: dict[str, Any] | None = None
         async with get_session() as session:
             job = await repo.get_parse_job(session, job_id)
             if not job:
@@ -250,10 +269,20 @@ async def process_job(job_id: uuid.UUID, schema: dict | None) -> None:
                 markdown_output=markdown_output,
                 json_output=document_json or None,
             )
+            webhook_url = job.webhook_url
+            webhook_payload = _webhook_payload(job)
+        if webhook_url and webhook_payload:
+            await post_webhook(webhook_url, webhook_payload)
     except Exception as exc:
+        webhook_url = None
+        webhook_payload = None
         async with get_session() as session:
             job = await repo.get_parse_job(session, job_id)
             if job:
                 await repo.update_job_status(
                     session, job, ParseJobStatus.FAILED, error_msg=str(exc)
                 )
+                webhook_url = job.webhook_url
+                webhook_payload = _webhook_payload(job)
+        if webhook_url and webhook_payload:
+            await post_webhook(webhook_url, webhook_payload)

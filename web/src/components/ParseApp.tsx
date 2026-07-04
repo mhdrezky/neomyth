@@ -2,10 +2,8 @@ import { useCallback, useRef, useState, useEffect } from "react";
 import {
   Upload,
   Play,
-  History,
   Copy,
   Check,
-  Plus,
   X,
   ChevronDown,
   ChevronLeft,
@@ -15,6 +13,10 @@ import {
   Eye,
   Braces,
   AlertCircle,
+  ArrowLeft,
+  RefreshCw,
+  Inbox,
+  Webhook,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -30,16 +32,16 @@ import {
   type SectionResult,
 } from "@/lib/parse-api";
 
-type View = "upload" | "processing" | "results";
+type View = "dashboard" | "results";
 type Tab = "markdown" | "json";
 
-const STEP_LABELS = [
-  "Uploading document…",
-  "Running layout analysis…",
-  "Extracting text & structure…",
-  "Mapping fields to schema…",
-  "Finalizing output…",
-];
+interface PendingUpload {
+  key: string;
+  filename: string;
+  error?: string;
+}
+
+const PAGE_SIZE = 10;
 
 const DOC_TYPE_COLORS: Record<string, string> = {
   INVOICE: "#3fb950",
@@ -49,15 +51,42 @@ const DOC_TYPE_COLORS: Record<string, string> = {
   OTHER: "#8b949e",
 };
 
+const STATUS_COLORS: Record<string, string> = {
+  QUEUED: "#8b949e",
+  PENDING: "#8b949e",
+  PROCESSING: "#58a6ff",
+  COMPLETED: "#3fb950",
+  FAILED: "#f85149",
+};
+
 const DEFAULT_SCHEMA = `{
-  "vendor": { "name": "string", "address": "string" },
-  "customer": { "name": "string", "contact": "string", "address": "string" },
-  "invoice": { "number": "string", "date": "date", "due_date": "date" },
-  "line_items": [
-    { "description": "string", "qty": "number", "unit_price": "number", "amount": "number" }
-  ],
-  "totals": { "subtotal": "number", "tax": "number", "total_due": "number" },
-  "notes": "string"
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "vendor": {
+      "type": "object",
+      "properties": { "name": { "type": "string" }, "address": { "type": "string" } }
+    },
+    "invoice": {
+      "type": "object",
+      "properties": { "number": { "type": "string" }, "date": { "type": "string" } },
+      "required": ["number"]
+    },
+    "line_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" },
+          "qty": { "type": "number" },
+          "unit_price": { "type": "number" }
+        },
+        "required": ["description"]
+      }
+    },
+    "total_due": { "type": "number" }
+  },
+  "required": ["invoice"]
 }`;
 
 const ACC = "#58a6ff";
@@ -72,19 +101,23 @@ function hexA(hex: string, a: number) {
 }
 
 export default function ParseApp() {
-  const [view, setView] = useState<View>("upload");
+  const [view, setView] = useState<View>("dashboard");
   const [activeTab, setActiveTab] = useState<Tab>("markdown");
   const [hovered, setHovered] = useState<string | null>(null);
   const [fileName, setFileName] = useState("");
-  const [step, setStep] = useState(0);
-  const [progress, setProgress] = useState(0);
   const [dragging, setDragging] = useState(false);
-  const [historyOpen, setHistoryOpen] = useState(false);
   const [schemaOpen, setSchemaOpen] = useState(false);
+  const [deliveryOpen, setDeliveryOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [schema, setSchema] = useState(DEFAULT_SCHEMA);
+  const [metadataText, setMetadataText] = useState("");
+  const [webhookUrl, setWebhookUrl] = useState("");
   const [error, setError] = useState("");
-  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [jobs, setJobs] = useState<HistoryItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
   const [apiConnected, setApiConnected] = useState(false);
   const [result, setResult] = useState<JobResult | null>(null);
   const [pageNumber, setPageNumber] = useState(1);
@@ -99,102 +132,101 @@ export default function ParseApp() {
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 
-  const loadHistory = useCallback(async () => {
+  const loadJobs = useCallback(async (pageArg: number) => {
+    setRefreshing(true);
     try {
-      const items = await getHistory();
-      setHistory(items);
+      const data = await getHistory(PAGE_SIZE, pageArg * PAGE_SIZE);
+      setJobs(data.items);
+      setTotal(data.total);
       setApiConnected(true);
     } catch {
       setApiConnected(false);
+    } finally {
+      setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { loadHistory(); }, [loadHistory]);
+  useEffect(() => { loadJobs(0); }, [loadJobs]);
 
-  // Visual step animation; advances to the last step and holds until the real
-  // job result arrives (the poll drives the transition to the results view).
-  const runProcessingAnimation = useCallback(() => {
-    const tick = (i: number) => {
-      setStep(i);
-      setProgress(Math.min(95, Math.round(((i + 1) / 5) * 100)));
-      if (i < 4) {
-        timersRef.current.push(setTimeout(() => tick(i + 1), 620));
+  const goToPage = useCallback(
+    (p: number) => {
+      setPage(p);
+      loadJobs(p);
+    },
+    [loadJobs],
+  );
+
+  // Upload each file and enqueue a job; the queue runs server-side, so the
+  // dashboard stays interactive and rows update on manual refresh.
+  const handleFiles = useCallback(
+    async (files: File[]) => {
+      const pdfs = files.filter((f) => f.name.toLowerCase().endsWith(".pdf"));
+      if (pdfs.length === 0) {
+        setError("Only PDF files are supported.");
+        return;
       }
-    };
-    timersRef.current.push(setTimeout(() => tick(0), 220));
-  }, []);
-
-  const pollJob = useCallback(async (jobId: string): Promise<JobResult> => {
-    for (let i = 0; i < 90; i++) {
-      const r = await getJob(jobId);
-      if (r.status === "COMPLETED" || r.status === "FAILED") return r;
-      await new Promise((res) => setTimeout(res, 800));
-    }
-    return getJob(jobId);
-  }, []);
-
-  const handleFile = useCallback(
-    async (file: File) => {
-      clearTimers();
       setError("");
-      setResult(null);
-      setHovered(null);
-      setPageNumber(1);
-      setHistoryOpen(false);
-      setFileName(file.name);
-      setStep(0);
-      setProgress(6);
-      setView("processing");
-      runProcessingAnimation();
-
-      try {
-        const doc = await uploadDocument(file);
-        const job = await startJob(doc.id, schema.trim() ? schema : undefined);
-        const final = await pollJob(job.job_id);
-        clearTimers();
-        if (final.status === "FAILED") {
-          setError(final.error_msg || "Parsing failed.");
+      const schemaText = schema.trim() ? schema : undefined;
+      const webhook = webhookUrl.trim() || undefined;
+      let metadata: Record<string, unknown> | undefined;
+      if (metadataText.trim()) {
+        try {
+          const parsed = JSON.parse(metadataText);
+          if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+            throw new Error("not an object");
+          }
+          metadata = parsed;
+        } catch {
+          setError("Metadata must be a valid JSON object, e.g. {\"client_ref\": \"order-42\"}.");
+          setDeliveryOpen(true);
+          return;
         }
-        setResult(final);
-        setProgress(100);
-        setView("results");
-        await loadHistory();
-      } catch {
-        clearTimers();
-        setError(
-          "Could not reach the parser API. Ensure the API server (port 5000) and the vLLM worker are running.",
-        );
-        setView("upload");
       }
+      for (const file of pdfs) {
+        const key = `${file.name}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        setPendingUploads((prev) => [...prev, { key, filename: file.name }]);
+        try {
+          const doc = await uploadDocument(file);
+          await startJob(doc.id, schemaText, metadata, webhook);
+          setPendingUploads((prev) => prev.filter((p) => p.key !== key));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Upload failed";
+          setPendingUploads((prev) =>
+            prev.map((p) => (p.key === key ? { ...p, error: msg } : p)),
+          );
+        }
+      }
+      setPage(0);
+      await loadJobs(0);
     },
-    [clearTimers, runProcessingAnimation, pollJob, schema, loadHistory],
+    [schema, metadataText, webhookUrl, loadJobs],
   );
 
-  const openHistoryJob = useCallback(
-    async (item: HistoryItem) => {
-      setHistoryOpen(false);
-      setError("");
-      setHovered(null);
-      setPageNumber(1);
-      setFileName(item.filename);
-      try {
-        const r = await getJob(item.job_id);
-        setResult(r);
-        setView("results");
-      } catch {
-        setError("Could not load that document.");
-      }
-    },
-    [],
-  );
+  const dismissPending = useCallback((key: string) => {
+    setPendingUploads((prev) => prev.filter((p) => p.key !== key));
+  }, []);
 
-  const reset = useCallback(() => {
-    clearTimers();
-    setView("upload");
-    setHovered(null);
+  const openJob = useCallback(async (item: HistoryItem) => {
+    if (item.status !== "COMPLETED") return;
     setError("");
+    setHovered(null);
+    setPageNumber(1);
+    setFileName(item.filename);
+    try {
+      const r = await getJob(item.job_id);
+      setResult(r);
+      setView("results");
+    } catch {
+      setError("Could not load that document.");
+    }
+  }, []);
+
+  const backToDashboard = useCallback(() => {
+    setView("dashboard");
+    setHovered(null);
     setResult(null);
-  }, [clearTimers]);
+    loadJobs(page);
+  }, [loadJobs, page]);
 
   const hoverSection = useCallback((s: SectionResult | null) => {
     setHovered(s?.id ?? null);
@@ -216,6 +248,8 @@ export default function ParseApp() {
   const sections = result?.sections ?? [];
   const pageCount = Math.max(1, ...sections.map((s) => s.page_number), 1);
   const pageSections = sections.filter((s) => s.page_number === pageNumber);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const visiblePending = page === 0 ? pendingUploads : [];
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background text-foreground" style={{ fontFamily: "'Space Grotesk', system-ui, sans-serif" }}>
@@ -228,24 +262,24 @@ export default function ParseApp() {
         statusActive={apiConnected}
       >
         {view === "results" && (
-          <Button variant="outline" size="sm" onClick={reset} className="gap-[7px]">
-            <Plus className="h-[14px] w-[14px]" />
-            New document
+          <Button variant="outline" size="sm" onClick={backToDashboard} className="gap-[7px]">
+            <ArrowLeft className="h-[14px] w-[14px]" />
+            Back to documents
           </Button>
         )}
       </ToolHeader>
 
       {/* MAIN */}
       <div className="relative flex-1 overflow-hidden">
-        {/* UPLOAD VIEW */}
-        {view === "upload" && (
+        {/* DASHBOARD VIEW */}
+        {view === "dashboard" && (
           <div className="absolute inset-0 overflow-y-auto">
-            <div className="mx-auto flex max-w-[780px] flex-col gap-[22px] px-7 pb-[120px] pt-[46px]">
+            <div className="mx-auto flex max-w-[780px] flex-col gap-[22px] px-7 pb-[60px] pt-[38px]">
               {/* Hero text */}
               <div className="mb-1 text-center">
                 <h1 className="text-[27px] font-bold tracking-tight">Parse any document into clean data</h1>
                 <p className="mt-[10px] text-[14.5px] leading-relaxed text-muted-foreground">
-                  Drop a PDF and let the model extract Markdown and structured JSON.
+                  Drop PDFs below — they are queued and parsed in the background.
                   <br />
                   Define an optional schema to shape the output exactly how you need it.
                 </p>
@@ -266,33 +300,35 @@ export default function ParseApp() {
                 onDrop={(e) => {
                   e.preventDefault();
                   setDragging(false);
-                  const f = e.dataTransfer.files?.[0];
-                  if (f) handleFile(f);
+                  const files = Array.from(e.dataTransfer.files ?? []);
+                  if (files.length) handleFiles(files);
                 }}
-                className="flex min-h-[200px] cursor-pointer flex-col items-center justify-center gap-2 rounded-[14px] text-center transition-all"
+                className="flex min-h-[170px] cursor-pointer flex-col items-center justify-center gap-2 rounded-[14px] text-center transition-all"
                 style={{
                   border: `2px dashed ${dragging ? ACC : "#30363d"}`,
                   background: dragging ? hexA(ACC, 0.08) : "#10151c",
                 }}
               >
                 <div
-                  className="mb-[6px] flex h-[58px] w-[58px] items-center justify-center rounded-[14px]"
+                  className="mb-[6px] flex h-[52px] w-[52px] items-center justify-center rounded-[14px]"
                   style={{ background: "#0d2a4d", border: "1px solid #1f4b80" }}
                 >
-                  <Upload className="h-[26px] w-[26px]" style={{ color: ACC }} />
+                  <Upload className="h-[24px] w-[24px]" style={{ color: ACC }} />
                 </div>
-                <div className="text-[16px] font-semibold">Drag & drop your PDF here</div>
+                <div className="text-[16px] font-semibold">Drag & drop PDFs here</div>
                 <div className="text-[13px] text-muted-foreground">
-                  or <span className="font-semibold" style={{ color: ACC }}>browse files</span> · PDF up to 25&nbsp;MB
+                  or <span className="font-semibold" style={{ color: ACC }}>browse files</span> · multiple PDFs up to 25&nbsp;MB each
                 </div>
                 <input
                   ref={fileRef}
                   type="file"
                   accept="application/pdf"
+                  multiple
                   className="hidden"
                   onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) handleFile(f);
+                    const files = Array.from(e.target.files ?? []);
+                    if (files.length) handleFiles(files);
+                    e.target.value = "";
                   }}
                 />
               </div>
@@ -306,7 +342,7 @@ export default function ParseApp() {
                 >
                   <span className="flex items-center gap-[10px]">
                     <Code2 className="h-[15px] w-[15px]" style={{ color: "#a371f7" }} />
-                    <span className="text-[13.5px] font-semibold">JSON output schema</span>
+                    <span className="text-[13.5px] font-semibold">JSON output schema (draft-07)</span>
                     <span className="rounded-full border border-border px-[7px] py-[2px] text-[11px] text-muted-foreground" style={{ background: "#161b22" }}>
                       optional
                     </span>
@@ -320,7 +356,7 @@ export default function ParseApp() {
                   <div className="border-t border-border">
                     <div className="flex items-center justify-between border-b border-border px-[14px] py-2" style={{ background: "#0d1117" }}>
                       <span className="text-[11.5px] text-muted-foreground" style={{ fontFamily: "'JetBrains Mono', monospace" }}>schema.json</span>
-                      <span className="text-[11px] text-muted-foreground">Leave empty to auto-detect structure</span>
+                      <span className="text-[11px] text-muted-foreground">Leave empty for free-form extraction</span>
                     </div>
                     <textarea
                       value={schema}
@@ -333,102 +369,136 @@ export default function ParseApp() {
                 )}
               </div>
 
-              {/* Action buttons */}
-              <div className="flex gap-3">
+              {/* Metadata & webhook */}
+              <div className="overflow-hidden rounded-xl border border-border" style={{ background: "#10151c" }}>
                 <button
-                  onClick={() => fileRef.current?.click()}
-                  className="flex flex-1 cursor-pointer items-center justify-center gap-[9px] rounded-[10px] border-none text-[14.5px] font-semibold text-white"
-                  style={{
-                    height: 46,
-                    background: "linear-gradient(135deg, #1f6feb, #388bfd)",
-                    boxShadow: "0 2px 12px rgba(31,111,235,.3)",
-                    fontFamily: "inherit",
-                  }}
+                  onClick={() => setDeliveryOpen(!deliveryOpen)}
+                  className="flex w-full items-center justify-between border-none bg-transparent px-4 py-[13px] text-foreground"
+                  style={{ fontFamily: "inherit" }}
                 >
-                  <Play className="h-[17px] w-[17px]" fill="white" />
-                  Select & parse document
+                  <span className="flex items-center gap-[10px]">
+                    <Webhook className="h-[15px] w-[15px]" style={{ color: "#f0883e" }} />
+                    <span className="text-[13.5px] font-semibold">Metadata & webhook</span>
+                    <span className="rounded-full border border-border px-[7px] py-[2px] text-[11px] text-muted-foreground" style={{ background: "#161b22" }}>
+                      optional
+                    </span>
+                  </span>
+                  <ChevronDown
+                    className="h-4 w-4 text-muted-foreground transition-transform"
+                    style={{ transform: deliveryOpen ? "rotate(180deg)" : "none" }}
+                  />
                 </button>
-                <button
-                  onClick={() => setHistoryOpen(true)}
-                  className="flex cursor-pointer items-center gap-[9px] rounded-[10px] border border-border px-[18px] text-[14px] font-medium text-foreground"
-                  style={{ height: 46, background: "#161b22", fontFamily: "inherit" }}
-                >
-                  <History className="h-4 w-4 text-muted-foreground" />
-                  History
-                </button>
-              </div>
-
-              {/* Feature cards */}
-              <div className="mt-[6px] flex gap-[14px]">
-                {[
-                  { icon: <FileText className="h-[18px] w-[18px]" style={{ color: "#3fb950" }} />, title: "Layout-aware Markdown", desc: "Headings, tables & lists preserved." },
-                  { icon: <Braces className="h-[18px] w-[18px]" style={{ color: "#a371f7" }} />, title: "Schema-bound JSON", desc: "Typed fields mapped to source." },
-                  { icon: <Eye className="h-[18px] w-[18px]" style={{ color: ACC }} />, title: "Source grounding", desc: "Every block traces to a region." },
-                ].map((f) => (
-                  <div key={f.title} className="flex flex-1 gap-[11px] rounded-[11px] border border-border p-[14px]" style={{ background: "#10151c" }}>
-                    <div className="mt-[1px] flex-none">{f.icon}</div>
+                {deliveryOpen && (
+                  <div className="flex flex-col gap-[14px] border-t border-border p-[14px]">
                     <div>
-                      <div className="text-[13px] font-semibold">{f.title}</div>
-                      <div className="mt-[3px] text-[11.5px] leading-[1.4] text-muted-foreground">{f.desc}</div>
+                      <div className="mb-[6px] flex items-center justify-between">
+                        <span className="text-[12px] font-semibold text-muted-foreground">Metadata (JSON object)</span>
+                        <span className="text-[10.5px] text-muted-foreground">Echoed back in responses & the webhook payload</span>
+                      </div>
+                      <textarea
+                        value={metadataText}
+                        onChange={(e) => setMetadataText(e.target.value)}
+                        spellCheck={false}
+                        placeholder={'{ "client_ref": "order-42", "source": "erp" }'}
+                        className="block w-full resize-y rounded-[8px] border border-border bg-background p-[11px] text-[12px] leading-[1.6] outline-none"
+                        style={{ fontFamily: "'JetBrains Mono', monospace", color: "#9db8d8", minHeight: 68 }}
+                      />
+                    </div>
+                    <div>
+                      <div className="mb-[6px] flex items-center justify-between">
+                        <span className="text-[12px] font-semibold text-muted-foreground">Webhook URL</span>
+                        <span className="text-[10.5px] text-muted-foreground">POSTed the job result when parsing finishes</span>
+                      </div>
+                      <input
+                        type="url"
+                        value={webhookUrl}
+                        onChange={(e) => setWebhookUrl(e.target.value)}
+                        spellCheck={false}
+                        placeholder="http://localhost:5000/parse/webhook-test"
+                        className="block w-full rounded-[8px] border border-border bg-background px-[11px] py-[9px] text-[12px] outline-none"
+                        style={{ fontFamily: "'JetBrains Mono', monospace", color: "#9db8d8" }}
+                      />
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* PROCESSING VIEW */}
-        {view === "processing" && (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="flex w-[420px] max-w-[90%] flex-col items-center gap-[22px]">
-              <div className="relative h-[120px] w-[96px] overflow-hidden rounded-lg bg-white" style={{ boxShadow: "0 8px 40px rgba(31,111,235,.25)" }}>
-                {[14, 28, 42, 62, 76, 96].map((t, i) => (
-                  <div
-                    key={i}
-                    className="absolute rounded-[3px]"
-                    style={{
-                      left: 12, top: t, right: i === 0 ? 12 : 20 + i * 5,
-                      height: i === 0 ? 6 : 5,
-                      background: i === 0 ? "#e6e6e6" : "#ededed",
-                    }}
-                  />
-                ))}
-                <div
-                  className="absolute left-0 right-0 h-[26px]"
-                  style={{
-                    background: "linear-gradient(180deg, rgba(56,139,253,0), rgba(56,139,253,.55))",
-                    borderBottom: "2px solid #58a6ff",
-                    animation: "pf-scan 1.5s ease-in-out infinite",
-                  }}
-                />
+                )}
               </div>
 
-              <div className="text-center">
-                <div className="text-[16px] font-semibold">{STEP_LABELS[step]}</div>
-                <div className="mt-[5px] text-[12.5px] text-muted-foreground" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
-                  {fileName}
+              {/* Select button */}
+              <button
+                onClick={() => fileRef.current?.click()}
+                className="flex cursor-pointer items-center justify-center gap-[9px] rounded-[10px] border-none text-[14.5px] font-semibold text-white"
+                style={{
+                  height: 46,
+                  background: "linear-gradient(135deg, #1f6feb, #388bfd)",
+                  boxShadow: "0 2px 12px rgba(31,111,235,.3)",
+                  fontFamily: "inherit",
+                }}
+              >
+                <Play className="h-[17px] w-[17px]" fill="white" />
+                Select & queue documents
+              </button>
+
+              {/* Documents list */}
+              <div className="mt-[8px]">
+                <div className="mb-[10px] flex items-center justify-between">
+                  <div className="flex items-center gap-[10px]">
+                    <span className="text-[15px] font-semibold">Documents</span>
+                    <span className="rounded-full border border-border px-2 py-[2px] text-[11px] text-muted-foreground" style={{ background: "#161b22" }}>
+                      {total}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => loadJobs(page)}
+                    disabled={refreshing}
+                    className="flex items-center gap-[7px] rounded-[8px] border border-border px-3 text-[12.5px] font-medium disabled:opacity-60"
+                    style={{ height: 32, background: "#161b22", color: "#9fb6cf", fontFamily: "inherit", cursor: refreshing ? "default" : "pointer" }}
+                  >
+                    <RefreshCw className={`h-[13px] w-[13px] ${refreshing ? "animate-spin" : ""}`} />
+                    Refresh status
+                  </button>
                 </div>
-              </div>
 
-              <div className="h-[6px] w-full overflow-hidden rounded border border-border" style={{ background: "#161b22" }}>
-                <div
-                  className="h-full rounded transition-[width] duration-400"
-                  style={{
-                    width: `${progress}%`,
-                    background: `linear-gradient(90deg, ${ACC}, ${hexA(ACC, 0.6)})`,
-                  }}
-                />
-              </div>
+                <div className="flex flex-col gap-[8px]">
+                  {visiblePending.map((p) => (
+                    <PendingRow key={p.key} item={p} onDismiss={dismissPending} />
+                  ))}
 
-              <div className="flex gap-2">
-                {STEP_LABELS.map((_, i) => (
-                  <span
-                    key={i}
-                    className="h-2 w-2 rounded-full transition-colors"
-                    style={{ background: i <= step ? ACC : "#21262d" }}
-                  />
-                ))}
+                  {jobs.length === 0 && visiblePending.length === 0 ? (
+                    <div className="flex flex-col items-center gap-2 rounded-[11px] border border-border py-10 text-muted-foreground" style={{ background: "#10151c" }}>
+                      <Inbox className="h-6 w-6" />
+                      <span className="text-[13px]">No documents yet. Drop PDFs above to get started.</span>
+                    </div>
+                  ) : (
+                    jobs.map((item) => (
+                      <JobQueueRow key={item.job_id} item={item} onOpen={openJob} />
+                    ))
+                  )}
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="mt-[14px] flex items-center justify-center gap-[12px]">
+                    <button
+                      onClick={() => goToPage(Math.max(0, page - 1))}
+                      disabled={page <= 0}
+                      className="flex h-[28px] w-[28px] items-center justify-center rounded border border-border text-muted-foreground disabled:opacity-40"
+                      style={{ background: "#161b22", cursor: page <= 0 ? "default" : "pointer" }}
+                    >
+                      <ChevronLeft className="h-[14px] w-[14px]" />
+                    </button>
+                    <span className="text-[12px] text-muted-foreground">
+                      Page {page + 1} of {totalPages}
+                    </span>
+                    <button
+                      onClick={() => goToPage(Math.min(totalPages - 1, page + 1))}
+                      disabled={page >= totalPages - 1}
+                      className="flex h-[28px] w-[28px] items-center justify-center rounded border border-border text-muted-foreground disabled:opacity-40"
+                      style={{ background: "#161b22", cursor: page >= totalPages - 1 ? "default" : "pointer" }}
+                    >
+                      <ChevronRight className="h-[14px] w-[14px]" />
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -556,93 +626,101 @@ export default function ParseApp() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
 
-      {/* HISTORY DRAWER */}
-      {historyOpen && (
-        <div className="fixed inset-0 z-[39] transition-opacity" style={{ background: "rgba(1,4,9,.55)" }} onClick={() => setHistoryOpen(false)} />
+function StatusBadge({ status, queuePosition }: { status: string; queuePosition: number | null }) {
+  const color = STATUS_COLORS[status] ?? STATUS_COLORS.PENDING;
+  const label =
+    status === "QUEUED" && queuePosition
+      ? `QUEUED · #${queuePosition}`
+      : status;
+  return (
+    <span
+      className="flex flex-none items-center gap-[6px] rounded-full px-[10px] py-[3px] text-[10.5px] font-semibold tracking-wide"
+      style={{ color, background: hexA(color, 0.12), border: `1px solid ${hexA(color, 0.35)}` }}
+    >
+      {status === "PROCESSING" && (
+        <span className="h-[6px] w-[6px] animate-pulse rounded-full" style={{ background: color }} />
       )}
-      <div
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border transition-transform"
-        style={{
-          background: "#0d1117",
-          boxShadow: "0 -12px 40px rgba(0,0,0,.5)",
-          transform: historyOpen ? "translateY(0)" : "translateY(110%)",
-          transitionTimingFunction: "cubic-bezier(.4,0,.2,1)",
-          transitionDuration: "280ms",
-        }}
-      >
-        <div className="flex items-center justify-between border-b border-border px-[18px] py-[13px]">
-          <div className="flex items-center gap-[10px]">
-            <History className="h-4 w-4" style={{ color: ACC }} />
-            <span className="text-[14px] font-semibold">Parsing history</span>
-            <span className="rounded-full border border-border px-2 py-[2px] text-[11px] text-muted-foreground" style={{ background: "#161b22" }}>
-              {history.length} documents
-            </span>
-          </div>
-          <button
-            onClick={() => setHistoryOpen(false)}
-            className="flex h-[30px] w-[30px] items-center justify-center rounded-[7px] border border-border text-muted-foreground"
-            style={{ background: "#161b22", cursor: "pointer" }}
-          >
-            <X className="h-[15px] w-[15px]" />
-          </button>
+      {label}
+    </span>
+  );
+}
+
+function JobQueueRow({ item, onOpen }: { item: HistoryItem; onOpen: (item: HistoryItem) => void }) {
+  const color = DOC_TYPE_COLORS[item.doc_type] ?? DOC_TYPE_COLORS.OTHER;
+  const clickable = item.status === "COMPLETED";
+  return (
+    <div
+      onClick={() => clickable && onOpen(item)}
+      className={`rounded-[11px] border border-border p-[13px] transition-colors ${clickable ? "cursor-pointer hover:border-primary/40" : ""}`}
+      style={{ background: "#10151c" }}
+    >
+      <div className="flex items-center gap-[12px]">
+        <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-lg" style={{ background: hexA(color, 0.13), color }}>
+          <FileText className="h-[16px] w-[16px]" />
         </div>
-        <div className="flex gap-3 overflow-x-auto px-[18px] py-4">
-          {history.length === 0 ? (
-            <div className="flex w-full items-center justify-center py-8 text-[13px] text-muted-foreground">
-              No documents parsed yet. Upload a PDF to get started.
-            </div>
-          ) : (
-            history.map((h) => {
-              const color = DOC_TYPE_COLORS[h.doc_type] ?? DOC_TYPE_COLORS.OTHER;
-              return (
-                <div
-                  key={h.job_id}
-                  onClick={() => openHistoryJob(h)}
-                  className="flex-none cursor-pointer rounded-[11px] border border-border p-[14px] transition-colors hover:border-primary/40"
-                  style={{ width: 232, background: "#10151c" }}
-                >
-                  <div className="mb-[11px] flex items-center gap-[9px]">
-                    <div className="flex h-[30px] w-[30px] flex-none items-center justify-center rounded-lg" style={{ background: hexA(color, 0.13), color }}>
-                      <FileText className="h-[15px] w-[15px]" />
-                    </div>
-                    <span className="rounded-full px-2 py-[2px] text-[10px] font-semibold" style={{ color, background: hexA(color, 0.12) }}>
-                      {h.doc_type}
-                    </span>
-                  </div>
-                  <div className="truncate text-[12.5px] font-semibold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{h.filename}</div>
-                  <div className="mt-[9px] flex items-center justify-between text-[11px] text-muted-foreground">
-                    <span>{new Date(h.created_at).toLocaleDateString()}</span>
-                    <span>{h.section_count} sections</span>
-                  </div>
-                </div>
-              );
-            })
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12.5px] font-semibold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+            {item.filename}
+          </div>
+          <div className="mt-[3px] flex items-center gap-[8px] text-[11px] text-muted-foreground">
+            <span className="rounded-full px-[7px] py-[1px] text-[9.5px] font-semibold" style={{ color, background: hexA(color, 0.12) }}>
+              {item.doc_type}
+            </span>
+            <span>{new Date(item.created_at).toLocaleString()}</span>
+            {item.status === "COMPLETED" && <span>· {item.section_count} sections</span>}
+          </div>
+        </div>
+        <StatusBadge status={item.status} queuePosition={item.queue_position} />
+      </div>
+      {item.status === "FAILED" && item.error_msg && (
+        <div className="mt-[9px] flex items-start gap-[7px] rounded-[8px] px-[10px] py-[7px] text-[11.5px]" style={{ background: hexA("#f85149", 0.07), color: "#f0a8a4" }}>
+          <AlertCircle className="mt-[1px] h-[12px] w-[12px] flex-none" />
+          <span className="break-words" style={{ minWidth: 0 }}>{item.error_msg}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PendingRow({ item, onDismiss }: { item: PendingUpload; onDismiss: (key: string) => void }) {
+  const failed = Boolean(item.error);
+  const color = failed ? "#f85149" : ACC;
+  return (
+    <div className="rounded-[11px] border border-border p-[13px]" style={{ background: "#10151c" }}>
+      <div className="flex items-center gap-[12px]">
+        <div className="flex h-[34px] w-[34px] flex-none items-center justify-center rounded-lg" style={{ background: hexA(color, 0.13), color }}>
+          <Upload className="h-[16px] w-[16px]" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12.5px] font-semibold" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+            {item.filename}
+          </div>
+          {failed && (
+            <div className="mt-[3px] text-[11px]" style={{ color: "#f0a8a4" }}>{item.error}</div>
           )}
         </div>
-      </div>
-
-      {/* History floating tab */}
-      {!historyOpen && view !== "processing" && (
-        <button
-          onClick={() => setHistoryOpen(true)}
-          className="fixed bottom-4 right-[18px] z-30 flex items-center gap-2 rounded-full border border-border px-[14px]"
-          style={{ height: 38, background: "#161b22", color: "#9fb6cf", fontFamily: "inherit", cursor: "pointer", boxShadow: "0 4px 16px rgba(0,0,0,.4)" }}
-        >
-          <History className="h-[14px] w-[14px]" />
-          <span className="text-[12.5px] font-medium">History</span>
-          <span className="rounded-[10px] border border-border px-[7px] py-[1px] text-[10px] text-muted-foreground" style={{ background: "#0d1117" }}>
-            {history.length}
+        {failed ? (
+          <button
+            onClick={() => onDismiss(item.key)}
+            className="flex h-[26px] w-[26px] flex-none items-center justify-center rounded-[7px] border border-border text-muted-foreground"
+            style={{ background: "#161b22", cursor: "pointer" }}
+          >
+            <X className="h-[13px] w-[13px]" />
+          </button>
+        ) : (
+          <span
+            className="flex flex-none items-center gap-[6px] rounded-full px-[10px] py-[3px] text-[10.5px] font-semibold tracking-wide"
+            style={{ color: ACC, background: hexA(ACC, 0.12), border: `1px solid ${hexA(ACC, 0.35)}` }}
+          >
+            <RefreshCw className="h-[10px] w-[10px] animate-spin" />
+            UPLOADING
           </span>
-        </button>
-      )}
-
-      <style>{`
-        @keyframes pf-scan {
-          0% { top: 0; }
-          100% { top: 100%; }
-        }
-      `}</style>
+        )}
+      </div>
     </div>
   );
 }

@@ -8,11 +8,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.config import get_settings
 from api.routers import parse, voice
+from modules.parse import service as parse_service
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Single-worker FIFO queue for parse jobs (also fails stale jobs on boot).
+    await parse_service.start_worker()
     yield
+    await parse_service.stop_worker()
 
 
 def create_app() -> FastAPI:

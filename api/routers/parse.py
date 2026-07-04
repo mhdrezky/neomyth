@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections import deque
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, HttpUrl
 
 from modules.parse import pdf, repository as repo, service
 from modules.shared.db import get_session
@@ -19,12 +21,15 @@ class StartJobRequest(BaseModel):
     document_id: uuid.UUID
     schema_id: uuid.UUID | None = None
     schema_text: str | None = None  # inline JSON schema from the editor
+    metadata: dict | None = None  # free-form, echoed in responses and webhook
+    webhook_url: HttpUrl | None = None  # POSTed the job result when the run ends
 
 
 class StartJobResponse(BaseModel):
     job_id: str
     document_id: str
     status: str
+    metadata: dict | None = None
 
 
 class UploadResponse(BaseModel):
@@ -80,6 +85,8 @@ async def start_job(body: StartJobRequest) -> StartJobResponse:
                 session,
                 document_id=body.document_id,
                 schema_id=body.schema_id,
+                metadata=body.metadata,
+                webhook_url=str(body.webhook_url) if body.webhook_url else None,
             )
         except ValueError as e:
             raise HTTPException(404, str(e))
@@ -87,6 +94,16 @@ async def start_job(body: StartJobRequest) -> StartJobResponse:
     # Job row is committed now — safe to kick off background processing.
     service.schedule_processing(uuid.UUID(result["job_id"]), schema)
     return StartJobResponse(**result)
+
+
+@router.get("/jobs/{job_id}/status")
+async def get_job_status(job_id: uuid.UUID) -> dict:
+    """Lightweight status for polling — no markdown/sections payload."""
+    async with get_session() as session:
+        result = await service.get_job_status(session, job_id)
+    if not result:
+        raise HTTPException(404, f"Job {job_id} not found")
+    return result
 
 
 @router.get("/jobs/{job_id}")
@@ -99,7 +116,8 @@ async def get_job(job_id: uuid.UUID) -> dict:
 
 
 @router.get("/history")
-async def list_history(limit: int = 20, offset: int = 0) -> list[dict]:
+async def list_history(limit: int = 20, offset: int = 0) -> dict:
+    """Paginated jobs list (active + finished): {items, total, limit, offset}."""
     async with get_session() as session:
         return await service.list_history(session, limit=limit, offset=offset)
 
@@ -141,6 +159,27 @@ async def delete_document(doc_id: uuid.UUID) -> dict:
     if not deleted:
         raise HTTPException(404, f"Document {doc_id} not found")
     return {"deleted": True}
+
+
+# Dev-only webhook receiver: point a job's webhook_url here to inspect what
+# the parser delivers. Kept in memory, newest first.
+_webhook_events: deque[dict] = deque(maxlen=20)
+
+
+@router.post("/webhook-test")
+async def webhook_test_receiver(payload: dict) -> dict:
+    _webhook_events.appendleft(
+        {
+            "received_at": datetime.now(timezone.utc).isoformat(),
+            "payload": payload,
+        }
+    )
+    return {"received": True}
+
+
+@router.get("/webhook-test")
+async def webhook_test_events() -> list[dict]:
+    return list(_webhook_events)
 
 
 @router.get("/schemas")

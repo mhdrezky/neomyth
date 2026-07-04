@@ -18,9 +18,10 @@ VOICE_LLM_TEMPERATURE = 0.7
 PARSE_LLM_TEMPERATURE = 0.0
 
 # Document parsing LLM budget. Must not exceed the vLLM worker's
-# --max-model-len (deploy/vllm-llm/.env LLM_MAX_MODEL_LEN); 8192 is what a
-# 4GB GPU fits for this model. Output is sized dynamically minus the prompt.
-MODEL_MAX_CONTEXT = 8192
+# --max-model-len (deploy/vllm-llm/.env LLM_MAX_MODEL_LEN); 6144 is what the
+# 4GB GPU fits for this model (vLLM estimated 7616 max at util 0.8).
+# Output is sized dynamically minus the prompt.
+MODEL_MAX_CONTEXT = 6144
 # Minimum output reserve for markdown → JSON extraction. The document body is
 # truncated to always leave at least this much; the actual max_tokens per call
 # is dynamic — the whole window left over after the prompt.
@@ -31,7 +32,8 @@ CHARS_PER_TOKEN = 3
 # Parse routing: a page with fewer extractable characters than this is treated
 # as a scanned image and sent to the vision model instead of PyMuPDF text.
 PARSE_SCANNED_PAGE_MIN_CHARS = 64
-PARSE_VISION_MAX_TOKENS = 4096
+# Must leave room for the page-image tokens within MODEL_MAX_CONTEXT.
+PARSE_VISION_MAX_TOKENS = 2048
 PARSE_VISION_RENDER_ZOOM = 2.0
 # How many times to ask the LLM to fix JSON that fails draft-07 validation.
 PARSE_JSON_REPAIR_ATTEMPTS = 1
@@ -40,3 +42,4 @@ TARGET_LATENCY_MS = 1200
 
 HTTP_TIMEOUT_SECONDS = 60.0
 HTTP_CONNECT_TIMEOUT_SECONDS = 5.0
+WEBHOOK_TIMEOUT_SECONDS = 10.0

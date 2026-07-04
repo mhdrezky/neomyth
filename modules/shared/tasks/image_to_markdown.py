@@ -2,8 +2,20 @@
 
 from __future__ import annotations
 
+import re
+
 from modules.shared.clients.vision import VisionLLMClient
 from modules.shared.constants import PARSE_LLM_TEMPERATURE, PARSE_VISION_MAX_TOKENS
+
+
+_FENCE_LINE = re.compile(r"^\s*`{3,}\s*(markdown)?\s*$", re.IGNORECASE)
+
+
+def _clean_transcription(raw: str) -> str:
+    """Drop code-fence wrapper lines; small models loop on them for near-empty
+    pages, so a fence-only result collapses to an empty string."""
+    lines = [ln for ln in raw.splitlines() if not _FENCE_LINE.match(ln)]
+    return "\n".join(lines).strip()
 
 
 async def image_to_markdown(
@@ -16,6 +28,7 @@ async def image_to_markdown(
     temperature: float = PARSE_LLM_TEMPERATURE,
 ) -> str:
     """Transcribe one page image to markdown. Raises on failure."""
-    return await client.complete_image(
+    raw = await client.complete_image(
         system_prompt, user_prompt, png, max_tokens=max_tokens, temperature=temperature
     )
+    return _clean_transcription(raw)

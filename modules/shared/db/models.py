@@ -39,7 +39,8 @@ class DocumentType(StrEnum):
 
 
 class ParseJobStatus(StrEnum):
-    PENDING = "PENDING"
+    PENDING = "PENDING"  # legacy rows only; new jobs start as QUEUED
+    QUEUED = "QUEUED"
     PROCESSING = "PROCESSING"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
@@ -127,11 +128,16 @@ class ParseJob(Base):
     status: Mapped[ParseJobStatus] = mapped_column(
         Enum(ParseJobStatus, name="parse_job_status"),
         nullable=False,
-        default=ParseJobStatus.PENDING,
+        default=ParseJobStatus.QUEUED,
     )
     error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
     markdown_output: Mapped[str | None] = mapped_column(Text, nullable=True)
     json_output: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # Free-form caller metadata, echoed back in every job response and the
+    # webhook payload. ("metadata" is reserved by SQLAlchemy Declarative.)
+    job_metadata: Mapped[dict | None] = mapped_column("metadata", JSONB, nullable=True)
+    # Optional target POSTed with the job result when the run finishes.
+    webhook_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

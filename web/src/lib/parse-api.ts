@@ -13,6 +13,19 @@ export interface StartJobResult {
   job_id: string;
   document_id: string;
   status: string;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface JobStatus {
+  job_id: string;
+  document_id: string;
+  status: string;
+  queue_position: number | null;
+  error_msg: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
 }
 
 export interface SectionResult {
@@ -41,11 +54,22 @@ export interface JobResult {
 
 export interface HistoryItem {
   job_id: string;
+  document_id: string;
   filename: string;
   doc_type: string;
   status: string;
+  queue_position: number | null;
+  error_msg: string | null;
   created_at: string;
+  completed_at: string | null;
   section_count: number;
+}
+
+export interface HistoryPage {
+  items: HistoryItem[];
+  total: number;
+  limit: number;
+  offset: number;
 }
 
 export async function uploadDocument(file: File): Promise<UploadResult> {
@@ -59,6 +83,8 @@ export async function uploadDocument(file: File): Promise<UploadResult> {
 export async function startJob(
   documentId: string,
   schemaText?: string,
+  metadata?: Record<string, unknown>,
+  webhookUrl?: string,
 ): Promise<StartJobResult> {
   const res = await fetch(`${BASE}/jobs`, {
     method: "POST",
@@ -66,6 +92,8 @@ export async function startJob(
     body: JSON.stringify({
       document_id: documentId,
       schema_text: schemaText ?? null,
+      metadata: metadata ?? null,
+      webhook_url: webhookUrl ?? null,
     }),
   });
   if (!res.ok) throw new Error(`Start job failed: ${res.status}`);
@@ -82,10 +110,16 @@ export async function getJob(jobId: string): Promise<JobResult> {
   return res.json();
 }
 
+export async function getJobStatus(jobId: string): Promise<JobStatus> {
+  const res = await fetch(`${BASE}/jobs/${jobId}/status`);
+  if (!res.ok) throw new Error(`Get job status failed: ${res.status}`);
+  return res.json();
+}
+
 export async function getHistory(
-  limit = 20,
+  limit = 10,
   offset = 0,
-): Promise<HistoryItem[]> {
+): Promise<HistoryPage> {
   const res = await fetch(`${BASE}/history?limit=${limit}&offset=${offset}`);
   if (!res.ok) throw new Error(`History failed: ${res.status}`);
   return res.json();
